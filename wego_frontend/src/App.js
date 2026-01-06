@@ -199,36 +199,136 @@ function App() {
   // Sticky header shadow on scroll (small UX polish)
   const [scrolled, setScrolled] = useState(false);
 
+  const authCallbackPath = "/auth/callback";
+  const authCallbackUrl = `${window.location.origin}${authCallbackPath}`;
+
+  const [profile, setProfile] = useState(null);
+
+  const safeMessage = (err, fallback) => {
+    const msg = err?.message || err?.error_description || err?.error || "";
+    return msg ? String(msg) : fallback;
+  };
+
+  const maybeIsMissingProfilesTableError = (err) => {
+    const msg = String(err?.message || "").toLowerCase();
+    // PostgREST errors vary; keep this tolerant and non-fatal.
+    return (
+      msg.includes("profiles") &&
+      (msg.includes("does not exist") ||
+        msg.includes("relation") ||
+        msg.includes("schema cache"))
+    );
+  };
+
+  const ensureProfile = async (u) => {
+    if (!u?.id) return null;
+
+    // Best-effort: if the user didn't create the SQL table, we don't block auth.
+    const payload = {
+      id: u.id,
+      email: u.email ?? null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+    if (error) {
+      if (maybeIsMissingProfilesTableError(error)) return null;
+      // eslint-disable-next-line no-console
+      console.warn("profiles upsert failed:", error);
+      return null;
+    }
+    return payload;
+  };
+
+  const fetchProfile = async (u) => {
+    if (!u?.id) return null;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id,email,full_name,avatar_url,updated_at")
+      .eq("id", u.id)
+      .maybeSingle();
+
+    if (error) {
+      if (maybeIsMissingProfilesTableError(error)) return null;
+      // eslint-disable-next-line no-console
+      console.warn("profiles fetch failed:", error);
+      return null;
+    }
+    return data ?? null;
+  };
+
   // Track auth on mount and on auth changes.
   useEffect(() => {
     let isMounted = true;
 
+    // If we landed on the OAuth callback path, finalize the session and return home.
     (async () => {
+      const isCallback = window.location.pathname === authCallbackPath;
+
       try {
-        const { data, error } = await supabase.auth.getUser();
-        if (!isMounted) return;
-        if (error) {
-          // Not fatal; can happen if there is no session.
-          setUser(null);
-          return;
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          if (isMounted) setAuthError(safeMessage(sessionError, "Unable to complete authentication."));
         }
-        setUser(data?.user ?? null);
+
+        const sessionUser = sessionData?.session?.user ?? null;
+
+        if (isCallback) {
+          // Provide a lightweight UX note and return to the root route.
+          if (sessionUser) {
+            setAuthNotice("Signed in successfully.");
+          } else {
+            // Supabase also sends error info in the URL query params sometimes.
+            const params = new URLSearchParams(window.location.search);
+            const urlErr =
+              params.get("error_description") || params.get("error") || params.get("message");
+            if (urlErr) setAuthError(urlErr);
+          }
+
+          // Clean up URL (avoid leaving tokens / query params around).
+          window.history.replaceState({}, document.title, "/");
+        }
+
+        // Update user state.
+        if (!isMounted) return;
+        setUser(sessionUser);
+
+        if (sessionUser) {
+          await ensureProfile(sessionUser);
+          const p = await fetchProfile(sessionUser);
+          if (isMounted) setProfile(p);
+        } else if (isMounted) {
+          setProfile(null);
+        }
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.error("Failed to read auth user:", e);
-        if (isMounted) setUser(null);
+        console.error("Failed to initialize auth session:", e);
+        if (isMounted) {
+          setUser(null);
+          setProfile(null);
+        }
       }
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Keep it minimal: only update user state.
-      setUser(session?.user ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const nextUser = session?.user ?? null;
+      setUser(nextUser);
+
+      if (nextUser) {
+        await ensureProfile(nextUser);
+        const p = await fetchProfile(nextUser);
+        setProfile(p);
+      } else {
+        setProfile(null);
+      }
     });
 
     return () => {
       isMounted = false;
       sub?.subscription?.unsubscribe?.();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -439,9 +539,10 @@ function App() {
         email: authForm.email.trim(),
         password: authForm.password,
         options: {
-          // Uses same-origin by default. If you add an email template / redirect flow,
-          // ensure allowed redirect URLs include this origin in Supabase.
-          emailRedirectTo: window.location.origin,
+          // IMPORTANT:
+          // Ensure this URL is added to Supabase Auth -> URL Configuration -> Redirect URLs.
+          // Using a dedicated callback path makes OAuth/email flows much more reliable.
+          emailRedirectTo: authCallbackUrl,
         },
       });
 
@@ -526,8 +627,9 @@ function App() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          // Keep it deterministic; after OAuth, return to the same origin.
-          redirectTo: window.location.origin,
+          // IMPORTANT:
+          // Add this exact URL to Supabase Auth -> URL Configuration -> Redirect URLs.
+          redirectTo: authCallbackUrl,
         },
       });
 
@@ -898,14 +1000,36 @@ function App() {
 
             <div style={headerStyles.right}>
               {user ? (
-                <button
-                  type="button"
-                  style={secondaryBtn}
-                  onClick={signOut}
-                  aria-label="Sign out"
-                >
-                  Sign Out
-                </button>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
+                  <div
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 999,
+                      border: `1px solid ${THEME.border}`,
+                      background: "rgba(255,255,255,0.75)",
+                      fontSize: 12,
+                      fontWeight: 900,
+                      color: THEME.text,
+                      maxWidth: 220,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={profile?.email || user.email || "Signed in"}
+                    aria-label="Signed in user"
+                  >
+                    {profile?.full_name || profile?.email || user.email || "Signed in"}
+                  </div>
+
+                  <button
+                    type="button"
+                    style={secondaryBtn}
+                    onClick={signOut}
+                    aria-label="Sign out"
+                  >
+                    Sign Out
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"
