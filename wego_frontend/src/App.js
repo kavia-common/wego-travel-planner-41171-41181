@@ -13,8 +13,8 @@ const THEME = {
   text: "#111827",
   mutedText: "#6B7280",
   border: "rgba(17, 24, 39, 0.12)",
-  shadow: "0 10px 25px rgba(17, 24, 39, 0.08)",
-  shadowSm: "0 4px 12px rgba(17, 24, 39, 0.08)",
+  shadow: "0 10px 25px rgba(17, 24, 39, 0.10)",
+  shadowSm: "0 4px 14px rgba(17, 24, 39, 0.08)",
 };
 
 /** Mock data (no external service calls yet). */
@@ -219,6 +219,7 @@ function App() {
   // Sticky header shadow on scroll (small UX polish)
   const [scrolled, setScrolled] = useState(false);
 
+  // IMPORTANT: no scrolling / hash manipulation on mount. Keep this effect for supabase detection only.
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -247,13 +248,21 @@ function App() {
     setQuotes(pickQuotes(MOCK_QUOTES, 3, quoteSeed));
   }, [quoteSeed]);
 
-  // Smooth anchor behavior + active section tracking
+  // Active section tracking only (no programmatic scroll). This keeps nav highlighting professional.
   useEffect(() => {
-    const sectionIds = ["home", "planner", "about", "contact", "privacy-policies"];
+    const sectionIds = [
+      "home",
+      "info",
+      "planner",
+      "quotes",
+      "reviews",
+      "about",
+      "contact",
+      "privacy-policies",
+    ];
 
     const handler = () => {
-      // Find the closest section to the top
-      const headerOffset = 84;
+      const headerOffset = 88;
       const candidates = sectionIds
         .map((id) => {
           const el = document.getElementById(id);
@@ -281,18 +290,20 @@ function App() {
     () => ({
       page: {
         minHeight: "100vh",
-        background: `radial-gradient(800px 400px at 20% 0%, rgba(37, 99, 235, 0.12), transparent 60%),
-                     radial-gradient(900px 500px at 80% 10%, rgba(245, 158, 11, 0.10), transparent 55%),
+        fontFamily:
+          'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
+        background: `radial-gradient(900px 460px at 20% -10%, rgba(37, 99, 235, 0.14), transparent 60%),
+                     radial-gradient(1000px 520px at 85% 0%, rgba(245, 158, 11, 0.10), transparent 55%),
                      ${THEME.background}`,
         color: THEME.text,
       },
       container: {
         maxWidth: 1120,
         margin: "0 auto",
-        padding: "0 16px",
+        padding: "0 18px",
       },
       section: {
-        padding: "42px 0",
+        padding: "56px 0",
       },
       sectionTitle: {
         fontSize: 22,
@@ -304,26 +315,45 @@ function App() {
         margin: "0 0 18px",
         color: THEME.mutedText,
         maxWidth: 820,
+        lineHeight: 1.55,
       },
       card: {
         background: THEME.surface,
         border: `1px solid ${THEME.border}`,
-        borderRadius: 16,
+        borderRadius: 18,
         boxShadow: THEME.shadowSm,
       },
     }),
     []
   );
 
+  /**
+   * Controlled navigation:
+   * - triggered only by user click
+   * - uses scrollIntoView per request
+   * - focuses the section for accessibility
+   */
   // PUBLIC_INTERFACE
   const onNavClick = (id) => {
     /** This is a public function. */
     const el = document.getElementById(id);
     if (!el) return;
-    const headerOffset = 72;
-    const top =
-      el.getBoundingClientRect().top + (window.scrollY || 0) - headerOffset;
-    window.scrollTo({ top, behavior: "smooth" });
+
+    // Scroll into view (requested).
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    // Set focus for screen readers/keyboard users.
+    // The section becomes programmatically focusable without affecting tab order.
+    el.setAttribute("tabindex", "-1");
+    window.setTimeout(() => {
+      try {
+        el.focus({ preventScroll: true });
+      } catch {
+        // no-op: some browsers may not support preventScroll
+        el.focus();
+      }
+    }, 300);
+
     setActiveNav(id);
   };
 
@@ -471,8 +501,8 @@ function App() {
 
     setIsPlanning(false);
 
-    // Bring user to quotes section after planning.
-    onNavClick("quotes");
+    // IMPORTANT: Keep navigation click-only.
+    // We do NOT auto-scroll users after planning; they can choose where to go next.
   };
 
   const headerStyles = useMemo(
@@ -482,11 +512,11 @@ function App() {
         top: 0,
         zIndex: 20,
         backdropFilter: "saturate(180%) blur(12px)",
-        background: "rgba(249, 250, 251, 0.82)",
+        background: "rgba(249, 250, 251, 0.88)",
         borderBottom: `1px solid ${
           scrolled ? "rgba(17, 24, 39, 0.14)" : "rgba(17, 24, 39, 0.10)"
         }`,
-        boxShadow: scrolled ? "0 10px 25px rgba(17, 24, 39, 0.08)" : "none",
+        boxShadow: scrolled ? "0 14px 30px rgba(17, 24, 39, 0.10)" : "none",
         transition: "box-shadow 180ms ease, border-color 180ms ease",
       },
       row: {
@@ -500,20 +530,20 @@ function App() {
         display: "flex",
         alignItems: "center",
         gap: 10,
-        minWidth: 200,
+        minWidth: 220,
         textAlign: "left",
       },
       logo: {
-        width: 36,
-        height: 36,
-        borderRadius: 12,
+        width: 38,
+        height: 38,
+        borderRadius: 14,
         background: `linear-gradient(135deg, ${THEME.primary}, ${THEME.secondary})`,
         boxShadow: THEME.shadowSm,
       },
       titleWrap: { display: "flex", flexDirection: "column" },
       title: {
-        fontSize: 16,
-        fontWeight: 800,
+        fontSize: 15,
+        fontWeight: 900,
         letterSpacing: "-0.02em",
         margin: 0,
         lineHeight: 1.1,
@@ -532,22 +562,19 @@ function App() {
       },
       navBtn: (active) => ({
         appearance: "none",
-        border: `1px solid ${active ? "rgba(37, 99, 235, 0.25)" : "transparent"}`,
+        border: `1px solid ${active ? "rgba(37, 99, 235, 0.28)" : "transparent"}`,
         background: active ? "rgba(37, 99, 235, 0.10)" : "transparent",
         color: THEME.text,
-        padding: "8px 10px",
+        padding: "9px 11px",
         borderRadius: 999,
         fontSize: 13,
-        fontWeight: 600,
+        fontWeight: 750,
         cursor: "pointer",
         transition:
-          "background 160ms ease, border-color 160ms ease, transform 120ms ease",
+          "background 160ms ease, border-color 160ms ease, transform 120ms ease, box-shadow 160ms ease",
         outline: "none",
       }),
-      navBtnFocus: {
-        boxShadow: `0 0 0 4px rgba(37, 99, 235, 0.18)`,
-      },
-      right: { display: "flex", gap: 10, alignItems: "center", minWidth: 240 },
+      right: { display: "flex", gap: 10, alignItems: "center", minWidth: 220 },
     }),
     [scrolled]
   );
@@ -555,16 +582,17 @@ function App() {
   const primaryBtn = useMemo(
     () => ({
       appearance: "none",
-      border: "1px solid rgba(37, 99, 235, 0.35)",
+      border: "1px solid rgba(37, 99, 235, 0.42)",
       background: `linear-gradient(135deg, ${THEME.primary}, #1D4ED8)`,
       color: "#fff",
-      padding: "10px 14px",
+      padding: "11px 14px",
       borderRadius: 12,
       fontSize: 13,
-      fontWeight: 700,
+      fontWeight: 850,
       cursor: "pointer",
       boxShadow: THEME.shadowSm,
-      transition: "transform 120ms ease, box-shadow 150ms ease, opacity 150ms",
+      transition:
+        "transform 120ms ease, box-shadow 160ms ease, filter 160ms ease",
       outline: "none",
       whiteSpace: "nowrap",
     }),
@@ -577,39 +605,37 @@ function App() {
       border: `1px solid ${THEME.border}`,
       background: THEME.surface,
       color: THEME.text,
-      padding: "10px 14px",
+      padding: "11px 14px",
       borderRadius: 12,
       fontSize: 13,
-      fontWeight: 700,
+      fontWeight: 850,
       cursor: "pointer",
       boxShadow: "none",
-      transition: "transform 120ms ease, box-shadow 150ms ease, opacity 150ms",
+      transition:
+        "transform 120ms ease, box-shadow 160ms ease, filter 160ms ease",
       outline: "none",
       whiteSpace: "nowrap",
     }),
     []
   );
 
-  const googleBtn = useMemo(
+  const accentBtn = useMemo(
     () => ({
       appearance: "none",
-      border: `1px solid ${THEME.border}`,
-      background: THEME.surface,
+      border: "1px solid rgba(245, 158, 11, 0.38)",
+      background: `linear-gradient(135deg, rgba(245, 158, 11, 0.20), rgba(245, 158, 11, 0.10))`,
       color: THEME.text,
-      padding: "10px 12px",
+      padding: "11px 14px",
       borderRadius: 12,
       fontSize: 13,
-      fontWeight: 700,
-      cursor: supabaseAvailable ? "pointer" : "not-allowed",
-      opacity: supabaseAvailable ? 1 : 0.6,
-      boxShadow: "none",
+      fontWeight: 900,
+      cursor: "pointer",
+      transition:
+        "transform 120ms ease, box-shadow 160ms ease, filter 160ms ease",
       outline: "none",
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
       whiteSpace: "nowrap",
     }),
-    [supabaseAvailable]
+    []
   );
 
   return (
@@ -618,21 +644,23 @@ function App() {
         href="#planner"
         style={{
           position: "absolute",
-          left: 8,
-          top: -40,
+          left: 10,
+          top: -48,
           background: THEME.surface,
-          padding: "8px 10px",
-          borderRadius: 10,
+          padding: "10px 12px",
+          borderRadius: 12,
           border: `1px solid ${THEME.border}`,
           color: THEME.text,
           textDecoration: "none",
-          fontWeight: 700,
+          fontWeight: 900,
+          outline: "none",
+          boxShadow: THEME.shadowSm,
         }}
         onFocus={(e) => {
-          e.currentTarget.style.top = "8px";
+          e.currentTarget.style.top = "10px";
         }}
         onBlur={(e) => {
-          e.currentTarget.style.top = "-40px";
+          e.currentTarget.style.top = "-48px";
         }}
       >
         Skip to planner
@@ -646,7 +674,7 @@ function App() {
               <div style={headerStyles.titleWrap}>
                 <p style={headerStyles.title}>WEGO Travel Planner</p>
                 <p style={headerStyles.subtitle}>
-                  Plan smarter • Discover more • Book later
+                  Business-ready itineraries • Consumer-friendly planning
                 </p>
               </div>
             </div>
@@ -744,7 +772,13 @@ function App() {
                 <h2 style={{ margin: 0, fontSize: 18, letterSpacing: "-0.02em" }}>
                   Sign in
                 </h2>
-                <p style={{ margin: "6px 0 0", color: THEME.mutedText, fontSize: 13 }}>
+                <p
+                  style={{
+                    margin: "6px 0 0",
+                    color: THEME.mutedText,
+                    fontSize: 13,
+                  }}
+                >
                   Choose a provider to continue. (Placeholder—no real auth yet.)
                 </p>
               </div>
@@ -764,6 +798,7 @@ function App() {
                   cursor: "pointer",
                   fontWeight: 900,
                   lineHeight: 1,
+                  outline: "none",
                 }}
               >
                 ×
@@ -820,8 +855,9 @@ function App() {
                   lineHeight: 1.5,
                 }}
               >
-                <strong style={{ color: THEME.text }}>Note:</strong> this is a demo UI.
-                We’ll enable real authentication later (e.g., via Google OAuth and a backend/auth provider).
+                <strong style={{ color: THEME.text }}>Note:</strong> this is a demo
+                UI. We’ll enable real authentication later (e.g., via Google OAuth
+                and a backend/auth provider).
               </div>
             </div>
           </div>
@@ -830,12 +866,16 @@ function App() {
 
       <main>
         {/* HOME / HERO */}
-        <section id="home" style={{ ...layout.section, paddingTop: 34 }}>
+        <section
+          id="home"
+          style={{ ...layout.section, paddingTop: 34 }}
+          aria-label="Hero section"
+        >
           <div style={layout.container}>
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1.15fr 0.85fr",
+                gridTemplateColumns: "1.1fr 0.9fr",
                 gap: 18,
                 alignItems: "stretch",
               }}
@@ -843,25 +883,63 @@ function App() {
               <div
                 style={{
                   ...layout.card,
-                  padding: 20,
+                  padding: 24,
                   background:
-                    "linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(245, 158, 11, 0.08))",
+                    "linear-gradient(135deg, rgba(37, 99, 235, 0.10), rgba(245, 158, 11, 0.08))",
+                  textAlign: "left",
                 }}
               >
-                <h1
+                <div
                   style={{
-                    margin: "0 0 10px",
-                    fontSize: 34,
-                    letterSpacing: "-0.03em",
-                    lineHeight: 1.1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "8px 12px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(37, 99, 235, 0.22)",
+                    background: "rgba(255,255,255,0.62)",
+                    color: THEME.text,
+                    fontWeight: 900,
+                    fontSize: 12,
+                    letterSpacing: "0.01em",
+                    width: "fit-content",
                   }}
                 >
-                  Your next trip, planned in minutes.
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 999,
+                      background: THEME.primary,
+                      boxShadow: "0 0 0 4px rgba(37, 99, 235, 0.16)",
+                    }}
+                  />
+                  WEGO Travel Planner for businesses and travelers
+                </div>
+
+                <h1
+                  style={{
+                    margin: "14px 0 10px",
+                    fontSize: 38,
+                    letterSpacing: "-0.03em",
+                    lineHeight: 1.08,
+                  }}
+                >
+                  Professional trip planning, without booking pressure.
                 </h1>
-                <p style={{ margin: "0 0 14px", color: THEME.mutedText }}>
-                  WEGO helps you plan trips around budget, duration, and what you
-                  actually love doing. Start with the planner, browse curated
-                  quote ideas, and book later when ready.
+                <p
+                  style={{
+                    margin: "0 0 14px",
+                    color: THEME.mutedText,
+                    lineHeight: 1.6,
+                    fontSize: 15,
+                    maxWidth: 640,
+                  }}
+                >
+                  Build clear itineraries for teams or personal travel—based on
+                  budget, duration, and interests. Start planning now, review
+                  curated quote ideas, and book when you’re ready.
                 </p>
 
                 <div
@@ -869,47 +947,48 @@ function App() {
                     display: "flex",
                     flexWrap: "wrap",
                     gap: 10,
-                    marginTop: 12,
+                    marginTop: 14,
                   }}
-                  aria-label="Quick actions"
+                  aria-label="Hero actions"
                 >
+                  {/* CTA must require click (no auto open). Click scrolls to general info area. */}
                   <button
                     type="button"
                     style={primaryBtn}
-                    onClick={() => onNavClick("planner")}
+                    onClick={() => onNavClick("info")}
                   >
-                    Plan a Trip
+                    See how WEGO works
                   </button>
                   <button
                     type="button"
-                    style={secondaryBtn}
+                    style={accentBtn}
                     onClick={() => onNavClick("planner")}
                   >
-                    Browse trip ideas
+                    Open planner
                   </button>
                 </div>
 
                 <div
                   style={{
-                    marginTop: 16,
+                    marginTop: 18,
                     display: "grid",
                     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
                     gap: 10,
                   }}
                 >
-                  <StatChip label="Budget-aware" value="Smart picks" />
-                  <StatChip label="Interests-based" value="Curated vibes" />
-                  <StatChip label="No booking pressure" value="Save & decide" />
+                  <StatChip label="For teams" value="Consistent itineraries" />
+                  <StatChip label="For travelers" value="Fast planning flow" />
+                  <StatChip label="For everyone" value="Transparent options" />
                 </div>
               </div>
 
-              <div style={{ ...layout.card, padding: 18 }}>
-                <h2 style={{ ...layout.sectionTitle, marginBottom: 12 }}>
+              <div style={{ ...layout.card, padding: 18, textAlign: "left" }}>
+                <h2 style={{ ...layout.sectionTitle, marginBottom: 10 }}>
                   Today’s highlights
                 </h2>
                 <p style={{ ...layout.sectionSubtitle, marginBottom: 14 }}>
-                  Fresh, mocked quote suggestions (backend integration will
-                  replace this soon).
+                  Mocked quote suggestions (backend integration will replace this
+                  soon).
                 </p>
                 <div
                   style={{
@@ -927,14 +1006,66 @@ function App() {
                         // Future integration: route to quote details page
                         // eslint-disable-next-line no-alert
                         alert(
-                          `View Details placeholder\n\nDestination: ${q.destination}\nSample price: ${formatINR(
-                            q.price
-                          )}`
+                          `View Details placeholder\n\nDestination: ${
+                            q.destination
+                          }\nSample price: ${formatINR(q.price)}`
                         );
                       }}
                     />
                   ))}
                 </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* GENERAL INFO AREA (hero CTA scroll target) */}
+        <section id="info" style={{ ...layout.section, paddingTop: 10 }}>
+          <div style={layout.container}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr",
+                gap: 12,
+              }}
+            >
+              <div
+                style={{
+                  ...layout.card,
+                  padding: 18,
+                  textAlign: "left",
+                }}
+              >
+                <h2 style={layout.sectionTitle}>Designed for clarity</h2>
+                <p style={{ ...layout.sectionSubtitle, marginBottom: 0 }}>
+                  WEGO is a lightweight planning UI. It focuses on{" "}
+                  <strong>structured inputs</strong>,{" "}
+                  <strong>local validation</strong>, and{" "}
+                  <strong>clear next steps</strong>—without auto-opening sections
+                  or forcing navigation. Use the header links to jump to About,
+                  Contact, or Privacy Policies only when you choose.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gap: 12,
+                }}
+              >
+                <InfoCard
+                  title="Predictable navigation"
+                  text="Sections only scroll into view on explicit clicks—no mount-time auto-scroll."
+                />
+                <InfoCard
+                  title="Professional UI"
+                  text="Consistent typography, spacing, and subtle hover/focus depth to match Ocean Professional."
+                />
+                <InfoCard
+                  title="Built for iteration"
+                  text="Mock data today; ready for real quotes, saved itineraries, and authentication later."
+                />
               </div>
             </div>
           </div>
@@ -967,7 +1098,7 @@ function App() {
                 onToggleInterest={toggleInterest}
               />
 
-              <div style={{ ...layout.card, padding: 16 }}>
+              <div style={{ ...layout.card, padding: 16, textAlign: "left" }}>
                 <h3
                   style={{
                     margin: "0 0 10px",
@@ -1001,7 +1132,7 @@ function App() {
                       "linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(245, 158, 11, 0.05))",
                   }}
                 >
-                  <p style={{ margin: 0, fontWeight: 800 }}>
+                  <p style={{ margin: 0, fontWeight: 900 }}>
                     Tip: Save time with Google Sign-In
                   </p>
                   <p style={{ margin: "6px 0 0", color: THEME.mutedText }}>
@@ -1021,7 +1152,7 @@ function App() {
                         border: `1px solid ${THEME.border}`,
                       }}
                     >
-                      <p style={{ margin: 0, fontWeight: 800 }}>
+                      <p style={{ margin: 0, fontWeight: 900 }}>
                         {planResult.summary}
                       </p>
                       <ul
@@ -1035,6 +1166,31 @@ function App() {
                           <li key={idx}>{t}</li>
                         ))}
                       </ul>
+
+                      {/* CTA must require click; no auto navigation */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 10,
+                          marginTop: 12,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          style={secondaryBtn}
+                          onClick={() => onNavClick("quotes")}
+                        >
+                          View matching quotes
+                        </button>
+                        <button
+                          type="button"
+                          style={accentBtn}
+                          onClick={() => onNavClick("contact")}
+                        >
+                          Share feedback
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -1064,11 +1220,11 @@ function App() {
                 marginBottom: 12,
               }}
             >
-              <div>
+              <div style={{ textAlign: "left" }}>
                 <h2 style={layout.sectionTitle}>Quotes</h2>
                 <p style={{ ...layout.sectionSubtitle, marginBottom: 0 }}>
-                  Dynamic quote cards (mocked). Refresh anytime or plan a trip to
-                  get more relevant suggestions.
+                  Dynamic quote cards (mocked). Refresh anytime or adjust inputs
+                  in the planner for more relevant suggestions.
                 </p>
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -1115,6 +1271,7 @@ function App() {
                 background: THEME.surface,
                 border: `1px dashed rgba(37, 99, 235, 0.35)`,
                 color: THEME.mutedText,
+                textAlign: "left",
               }}
               role="note"
               aria-label="Quotes note"
@@ -1126,11 +1283,7 @@ function App() {
         </section>
 
         {/* REVIEWS */}
-        <section
-          id="reviews"
-          style={layout.section}
-          aria-label="Reviews section"
-        >
+        <section id="reviews" style={layout.section} aria-label="Reviews section">
           <div style={layout.container}>
             <h2 style={layout.sectionTitle}>Reviews</h2>
             <p style={layout.sectionSubtitle}>
@@ -1156,10 +1309,10 @@ function App() {
           <div style={layout.container}>
             <h2 style={layout.sectionTitle}>About WEGO</h2>
             <p style={layout.sectionSubtitle}>
-              WEGO is built to make travel planning fast, transparent, and
-              delightful—without forcing bookings. Today’s UI is a foundation for
-              future integrations: live quotes, saved itineraries, and secure
-              authentication.
+              WEGO helps businesses and travelers plan with speed and confidence:
+              structured preferences, clear outputs, and transparent choices.
+              Today’s UI is a foundation for future integrations: live quotes,
+              saved itineraries, and secure authentication.
             </p>
 
             <div
@@ -1186,11 +1339,7 @@ function App() {
         </section>
 
         {/* CONTACT */}
-        <section
-          id="contact"
-          style={layout.section}
-          aria-label="Contact section"
-        >
+        <section id="contact" style={layout.section} aria-label="Contact section">
           <div style={layout.container}>
             <h2 style={layout.sectionTitle}>Contact Us</h2>
             <p style={layout.sectionSubtitle}>
@@ -1353,7 +1502,7 @@ function App() {
                   background: `linear-gradient(135deg, ${THEME.primary}, ${THEME.secondary})`,
                 }}
               />
-              <p style={{ margin: 0, color: THEME.mutedText, fontWeight: 700 }}>
+              <p style={{ margin: 0, color: THEME.mutedText, fontWeight: 800 }}>
                 © {new Date().getFullYear()} WEGO • Travel Planner UI
               </p>
             </div>
@@ -1385,8 +1534,32 @@ function App() {
         </div>
       </footer>
 
-      {/* Lightweight responsive overrides without needing additional CSS edits */}
+      {/* Lightweight responsive overrides + hover/focus polish without mount transitions */}
       <style>{`
+        :root {
+          --wego-focus: rgba(37, 99, 235, 0.45);
+        }
+
+        /* Ensure focus outlines are visible and accessible */
+        :where(button, a, input, select, textarea):focus-visible {
+          outline: 3px solid var(--wego-focus);
+          outline-offset: 2px;
+        }
+
+        /* Subtle hover/focus transitions (not on mount) */
+        button:hover {
+          transform: translateY(-1px);
+        }
+        button:active {
+          transform: translateY(0);
+        }
+
+        /* Card hover depth (subtle) */
+        [data-card="true"]:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 14px 34px rgba(17, 24, 39, 0.12);
+        }
+
         @media (max-width: 980px) {
           #home > div > div,
           #planner > div > div,
@@ -1395,6 +1568,10 @@ function App() {
           }
 
           #quotes > div > div:nth-of-type(2) {
+            grid-template-columns: 1fr !important;
+          }
+
+          #info > div > div:nth-of-type(2) {
             grid-template-columns: 1fr !important;
           }
         }
@@ -1429,20 +1606,30 @@ function NavItem({ label, targetId, active, onClick, styleFn }) {
   const [isFocused, setIsFocused] = useState(false);
 
   return (
-    <button
-      type="button"
-      onClick={() => onClick(targetId)}
+    <a
+      href={`#${targetId}`}
+      onClick={(e) => {
+        e.preventDefault();
+        onClick(targetId);
+      }}
       aria-current={active ? "page" : undefined}
       aria-label={`Go to ${label}`}
       onFocus={() => setIsFocused(true)}
       onBlur={() => setIsFocused(false)}
       style={{
-        ...styleFn(active),
-        boxShadow: isFocused ? `0 0 0 4px rgba(37, 99, 235, 0.16)` : "none",
+        display: "inline-flex",
+        textDecoration: "none",
       }}
     >
-      {label}
-    </button>
+      <span
+        style={{
+          ...styleFn(active),
+          boxShadow: isFocused ? `0 0 0 4px rgba(37, 99, 235, 0.16)` : "none",
+        }}
+      >
+        {label}
+      </span>
+    </a>
   );
 }
 
@@ -1471,30 +1658,33 @@ function PlannerPanel({
 
   const labelStyle = {
     fontSize: 12,
-    fontWeight: 800,
+    fontWeight: 900,
     marginBottom: 6,
     display: "block",
+    letterSpacing: "0.01em",
   };
 
   const helpStyle = {
     marginTop: 6,
     color: THEME.mutedText,
     fontSize: 12,
+    lineHeight: 1.4,
   };
 
   const errorStyle = {
     marginTop: 6,
     color: "#B91C1C",
     fontSize: 12,
-    fontWeight: 700,
+    fontWeight: 800,
   };
 
   const panelCard = {
     background: THEME.surface,
     border: `1px solid ${THEME.border}`,
-    borderRadius: 16,
+    borderRadius: 18,
     boxShadow: THEME.shadow,
     overflow: "hidden",
+    textAlign: "left",
   };
 
   const header = {
@@ -1513,7 +1703,7 @@ function PlannerPanel({
           Trip preferences
         </h3>
         <p style={{ margin: "6px 0 0", color: THEME.mutedText }}>
-          Fill the essentials. Fields marked required help us shape suggestions.
+          Fill the essentials. Fields marked required help shape suggestions.
         </p>
       </div>
 
@@ -1538,7 +1728,9 @@ function PlannerPanel({
               placeholder="e.g., Bali, Indonesia"
               style={{
                 ...fieldStyle,
-                borderColor: validation.destination ? "rgba(185, 28, 28, 0.4)" : THEME.border,
+                borderColor: validation.destination
+                  ? "rgba(185, 28, 28, 0.4)"
+                  : THEME.border,
               }}
               aria-invalid={Boolean(validation.destination)}
               aria-describedby="destination_help destination_error"
@@ -1586,10 +1778,14 @@ function PlannerPanel({
               min={1}
               max={60}
               value={planner.nights}
-              onChange={(e) => onFieldChange("nights", clamp(Number(e.target.value), 1, 60))}
+              onChange={(e) =>
+                onFieldChange("nights", clamp(Number(e.target.value), 1, 60))
+              }
               style={{
                 ...fieldStyle,
-                borderColor: validation.nights ? "rgba(185, 28, 28, 0.4)" : THEME.border,
+                borderColor: validation.nights
+                  ? "rgba(185, 28, 28, 0.4)"
+                  : THEME.border,
               }}
               aria-invalid={Boolean(validation.nights)}
               aria-describedby="nights_help nights_error"
@@ -1615,10 +1811,14 @@ function PlannerPanel({
               type="number"
               min={1000}
               value={planner.budget}
-              onChange={(e) => onFieldChange("budget", Math.max(0, Number(e.target.value)))}
+              onChange={(e) =>
+                onFieldChange("budget", Math.max(0, Number(e.target.value)))
+              }
               style={{
                 ...fieldStyle,
-                borderColor: validation.budget ? "rgba(185, 28, 28, 0.4)" : THEME.border,
+                borderColor: validation.budget
+                  ? "rgba(185, 28, 28, 0.4)"
+                  : THEME.border,
               }}
               aria-invalid={Boolean(validation.budget)}
               aria-describedby="budget_help budget_error"
@@ -1650,7 +1850,9 @@ function PlannerPanel({
               }
               style={{
                 ...fieldStyle,
-                borderColor: validation.travelers ? "rgba(185, 28, 28, 0.4)" : THEME.border,
+                borderColor: validation.travelers
+                  ? "rgba(185, 28, 28, 0.4)"
+                  : THEME.border,
               }}
               aria-invalid={Boolean(validation.travelers)}
               aria-describedby="travelers_help travelers_error"
@@ -1717,7 +1919,10 @@ function PlannerPanel({
               <label style={{ ...labelStyle, marginBottom: 0 }}>
                 Interests <span aria-hidden="true">*</span>
               </label>
-              <span id="dates_help" style={{ color: THEME.mutedText, fontSize: 12 }}>
+              <span
+                id="dates_help"
+                style={{ color: THEME.mutedText, fontSize: 12 }}
+              >
                 Choose at least one.
               </span>
             </div>
@@ -1756,6 +1961,7 @@ function PlannerPanel({
                           : THEME.surface,
                         cursor: "pointer",
                         userSelect: "none",
+                        transition: "transform 120ms ease, box-shadow 160ms ease",
                       }}
                     >
                       <input
@@ -1764,7 +1970,7 @@ function PlannerPanel({
                         onChange={() => onToggleInterest(i)}
                         aria-label={i}
                       />
-                      <span style={{ fontWeight: 700, fontSize: 13 }}>{i}</span>
+                      <span style={{ fontWeight: 800, fontSize: 13 }}>{i}</span>
                     </label>
                   );
                 })}
@@ -1781,21 +1987,31 @@ function PlannerPanel({
               </div>
             ) : null}
 
-            <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <div
+              style={{
+                marginTop: 14,
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
               <button
                 type="submit"
                 style={{
                   appearance: "none",
-                  border: "1px solid rgba(37, 99, 235, 0.35)",
+                  border: "1px solid rgba(37, 99, 235, 0.42)",
                   background: `linear-gradient(135deg, ${THEME.primary}, #1D4ED8)`,
                   color: "#fff",
                   padding: "10px 14px",
                   borderRadius: 12,
                   fontSize: 14,
-                  fontWeight: 800,
+                  fontWeight: 900,
                   cursor: isPlanning ? "progress" : "pointer",
                   opacity: isPlanning ? 0.85 : 1,
                   boxShadow: THEME.shadowSm,
+                  outline: "none",
+                  transition:
+                    "transform 120ms ease, box-shadow 160ms ease, filter 160ms ease",
                 }}
                 aria-busy={isPlanning}
               >
@@ -1825,8 +2041,11 @@ function PlannerPanel({
                   padding: "10px 14px",
                   borderRadius: 12,
                   fontSize: 14,
-                  fontWeight: 800,
+                  fontWeight: 900,
                   cursor: "pointer",
+                  outline: "none",
+                  transition:
+                    "transform 120ms ease, box-shadow 160ms ease, filter 160ms ease",
                 }}
               >
                 Reset
@@ -1854,26 +2073,36 @@ function QuoteCard({ quote, onCta, compact = false }) {
 
   return (
     <div
+      data-card="true"
       style={{
         background: THEME.surface,
         border: `1px solid ${THEME.border}`,
-        borderRadius: 16,
+        borderRadius: 18,
         padding: compact ? 12 : 14,
         boxShadow: THEME.shadowSm,
         display: "flex",
         flexDirection: "column",
         gap: 10,
         minHeight: compact ? "auto" : 180,
+        transition: "transform 140ms ease, box-shadow 180ms ease",
       }}
       aria-label={`Quote card for ${quote.destination}`}
     >
-      <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 10 }}>
-        <div>
-          <p style={{ margin: 0, fontWeight: 900, letterSpacing: "-0.01em" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "start",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+      >
+        <div style={{ textAlign: "left" }}>
+          <p style={{ margin: 0, fontWeight: 950, letterSpacing: "-0.01em" }}>
             {quote.destination}
           </p>
           <p style={{ margin: "6px 0 0", color: THEME.mutedText, fontSize: 13 }}>
-            Sample from <strong>{formatINR(quote.price)}</strong> • {quote.nights} night(s)
+            Sample from <strong>{formatINR(quote.price)}</strong> • {quote.nights}{" "}
+            night(s)
           </p>
         </div>
 
@@ -1922,7 +2151,7 @@ function QuoteCard({ quote, onCta, compact = false }) {
             key={t}
             style={{
               fontSize: 12,
-              fontWeight: 800,
+              fontWeight: 900,
               padding: "6px 10px",
               borderRadius: 999,
               border: `1px solid ${THEME.border}`,
@@ -1941,17 +2170,19 @@ function QuoteCard({ quote, onCta, compact = false }) {
           onClick={onCta}
           style={{
             appearance: "none",
-            border: "1px solid rgba(37, 99, 235, 0.35)",
+            border: "1px solid rgba(37, 99, 235, 0.42)",
             background: `linear-gradient(135deg, ${THEME.primary}, #1D4ED8)`,
             color: "#fff",
             padding: "10px 12px",
             borderRadius: 12,
             fontSize: 13,
-            fontWeight: 800,
+            fontWeight: 900,
             cursor: "pointer",
             boxShadow: THEME.shadowSm,
             flex: 1,
             minWidth: 140,
+            outline: "none",
+            transition: "transform 120ms ease, box-shadow 160ms ease",
           }}
         >
           {compact ? "View Details" : "Book later"}
@@ -1972,9 +2203,11 @@ function QuoteCard({ quote, onCta, compact = false }) {
             padding: "10px 12px",
             borderRadius: 12,
             fontSize: 13,
-            fontWeight: 800,
+            fontWeight: 900,
             cursor: "pointer",
             minWidth: 120,
+            outline: "none",
+            transition: "transform 120ms ease, box-shadow 160ms ease",
           }}
         >
           Save
@@ -1994,15 +2227,17 @@ function ReviewItem({ review }) {
 
   return (
     <article
+      data-card="true"
       style={{
         background: THEME.surface,
         border: `1px solid ${THEME.border}`,
-        borderRadius: 16,
+        borderRadius: 18,
         padding: 14,
         boxShadow: THEME.shadowSm,
         display: "flex",
         flexDirection: "column",
         gap: 10,
+        transition: "transform 140ms ease, box-shadow 180ms ease",
       }}
       aria-label={`Review by ${review.name}`}
     >
@@ -2018,7 +2253,7 @@ function ReviewItem({ review }) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontWeight: 900,
+            fontWeight: 950,
             color: THEME.text,
             border: `1px solid ${THEME.border}`,
           }}
@@ -2027,9 +2262,9 @@ function ReviewItem({ review }) {
         </div>
 
         <div style={{ flex: 1 }}>
-          <p style={{ margin: 0, fontWeight: 900 }}>
+          <p style={{ margin: 0, fontWeight: 950 }}>
             {review.name}{" "}
-            <span style={{ color: THEME.mutedText, fontWeight: 700 }}>
+            <span style={{ color: THEME.mutedText, fontWeight: 800 }}>
               • {review.destination}
             </span>
           </p>
@@ -2078,7 +2313,9 @@ function ReviewItem({ review }) {
         </div>
       </div>
 
-      <p style={{ margin: 0, color: THEME.text }}>{review.text}</p>
+      <p style={{ margin: 0, color: THEME.text, lineHeight: 1.55 }}>
+        {review.text}
+      </p>
     </article>
   );
 }
@@ -2151,7 +2388,13 @@ function ContactForm() {
         <div>
           <label
             htmlFor="contact_name"
-            style={{ fontSize: 12, fontWeight: 900, display: "block", marginBottom: 6 }}
+            style={{
+              fontSize: 12,
+              fontWeight: 950,
+              display: "block",
+              marginBottom: 6,
+              letterSpacing: "0.01em",
+            }}
           >
             Name
           </label>
@@ -2166,7 +2409,15 @@ function ContactForm() {
             placeholder="Your name"
           />
           {errors.name ? (
-            <div id="contact_name_err" style={{ marginTop: 6, color: "#B91C1C", fontSize: 12, fontWeight: 800 }}>
+            <div
+              id="contact_name_err"
+              style={{
+                marginTop: 6,
+                color: "#B91C1C",
+                fontSize: 12,
+                fontWeight: 900,
+              }}
+            >
               {errors.name}
             </div>
           ) : null}
@@ -2175,7 +2426,13 @@ function ContactForm() {
         <div>
           <label
             htmlFor="contact_email"
-            style={{ fontSize: 12, fontWeight: 900, display: "block", marginBottom: 6 }}
+            style={{
+              fontSize: 12,
+              fontWeight: 950,
+              display: "block",
+              marginBottom: 6,
+              letterSpacing: "0.01em",
+            }}
           >
             Email
           </label>
@@ -2191,7 +2448,15 @@ function ContactForm() {
             placeholder="you@example.com"
           />
           {errors.email ? (
-            <div id="contact_email_err" style={{ marginTop: 6, color: "#B91C1C", fontSize: 12, fontWeight: 800 }}>
+            <div
+              id="contact_email_err"
+              style={{
+                marginTop: 6,
+                color: "#B91C1C",
+                fontSize: 12,
+                fontWeight: 900,
+              }}
+            >
               {errors.email}
             </div>
           ) : null}
@@ -2200,7 +2465,13 @@ function ContactForm() {
         <div style={{ gridColumn: "1 / -1" }}>
           <label
             htmlFor="contact_message"
-            style={{ fontSize: 12, fontWeight: 900, display: "block", marginBottom: 6 }}
+            style={{
+              fontSize: 12,
+              fontWeight: 950,
+              display: "block",
+              marginBottom: 6,
+              letterSpacing: "0.01em",
+            }}
           >
             Message
           </label>
@@ -2218,35 +2489,59 @@ function ContactForm() {
             aria-describedby="contact_message_help contact_message_err"
             placeholder="How can we help? (This is a demo – submission is a no-op)"
           />
-          <div id="contact_message_help" style={{ marginTop: 6, color: THEME.mutedText, fontSize: 12 }}>
+          <div
+            id="contact_message_help"
+            style={{ marginTop: 6, color: THEME.mutedText, fontSize: 12 }}
+          >
             We’ll wire this to a real support channel soon.
           </div>
           {errors.message ? (
-            <div id="contact_message_err" style={{ marginTop: 6, color: "#B91C1C", fontSize: 12, fontWeight: 800 }}>
+            <div
+              id="contact_message_err"
+              style={{
+                marginTop: 6,
+                color: "#B91C1C",
+                fontSize: 12,
+                fontWeight: 900,
+              }}
+            >
               {errors.message}
             </div>
           ) : null}
         </div>
 
-        <div style={{ gridColumn: "1 / -1", display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
           <button
             type="submit"
             style={{
               appearance: "none",
-              border: "1px solid rgba(37, 99, 235, 0.35)",
+              border: "1px solid rgba(37, 99, 235, 0.42)",
               background: `linear-gradient(135deg, ${THEME.primary}, #1D4ED8)`,
               color: "#fff",
               padding: "10px 14px",
               borderRadius: 12,
               fontSize: 14,
-              fontWeight: 900,
+              fontWeight: 950,
               cursor: status === "sending" ? "progress" : "pointer",
               boxShadow: THEME.shadowSm,
               opacity: status === "sending" ? 0.85 : 1,
+              outline: "none",
+              transition: "transform 120ms ease, box-shadow 160ms ease",
             }}
             aria-busy={status === "sending"}
           >
-            {status === "sent" ? "Sent (demo)" : status === "sending" ? "Sending..." : "Send message"}
+            {status === "sent"
+              ? "Sent (demo)"
+              : status === "sending"
+              ? "Sending..."
+              : "Send message"}
           </button>
 
           <button
@@ -2264,15 +2559,23 @@ function ContactForm() {
               padding: "10px 14px",
               borderRadius: 12,
               fontSize: 14,
-              fontWeight: 900,
+              fontWeight: 950,
               cursor: "pointer",
+              outline: "none",
+              transition: "transform 120ms ease, box-shadow 160ms ease",
             }}
           >
             Clear
           </button>
 
           {status === "sent" ? (
-            <div style={{ alignSelf: "center", color: THEME.mutedText, fontWeight: 800 }}>
+            <div
+              style={{
+                alignSelf: "center",
+                color: THEME.mutedText,
+                fontWeight: 900,
+              }}
+            >
               Thanks! (Saved to console only.)
             </div>
           ) : null}
@@ -2290,18 +2593,31 @@ function StatChip({ label, value }) {
   /** This is a public function. */
   return (
     <div
+      data-card="true"
       style={{
         padding: 12,
-        borderRadius: 16,
+        borderRadius: 18,
         border: `1px solid ${THEME.border}`,
         background: "rgba(255, 255, 255, 0.75)",
+        transition: "transform 140ms ease, box-shadow 180ms ease",
+        boxShadow: "0 2px 10px rgba(17,24,39,0.05)",
+        textAlign: "left",
       }}
       aria-label={`${label}: ${value}`}
     >
-      <p style={{ margin: 0, fontSize: 12, color: THEME.mutedText, fontWeight: 800 }}>
+      <p
+        style={{
+          margin: 0,
+          fontSize: 12,
+          color: THEME.mutedText,
+          fontWeight: 900,
+        }}
+      >
         {label}
       </p>
-      <p style={{ margin: "4px 0 0", fontSize: 14, fontWeight: 900 }}>{value}</p>
+      <p style={{ margin: "4px 0 0", fontSize: 14, fontWeight: 950 }}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -2311,8 +2627,10 @@ function Hint({ title, text }) {
   /** This is a public function. */
   return (
     <div style={{ padding: "10px 0", borderBottom: `1px solid ${THEME.border}` }}>
-      <p style={{ margin: 0, fontWeight: 900 }}>{title}</p>
-      <p style={{ margin: "6px 0 0", color: THEME.mutedText }}>{text}</p>
+      <p style={{ margin: 0, fontWeight: 950 }}>{title}</p>
+      <p style={{ margin: "6px 0 0", color: THEME.mutedText, lineHeight: 1.55 }}>
+        {text}
+      </p>
     </div>
   );
 }
@@ -2322,16 +2640,23 @@ function InfoCard({ title, text }) {
   /** This is a public function. */
   return (
     <div
+      data-card="true"
       style={{
         background: THEME.surface,
         border: `1px solid ${THEME.border}`,
-        borderRadius: 16,
+        borderRadius: 18,
         padding: 16,
         boxShadow: THEME.shadowSm,
+        textAlign: "left",
+        transition: "transform 140ms ease, box-shadow 180ms ease",
       }}
     >
-      <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>{title}</h3>
-      <p style={{ margin: 0, color: THEME.mutedText }}>{text}</p>
+      <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 950 }}>
+        {title}
+      </h3>
+      <p style={{ margin: 0, color: THEME.mutedText, lineHeight: 1.55 }}>
+        {text}
+      </p>
     </div>
   );
 }
