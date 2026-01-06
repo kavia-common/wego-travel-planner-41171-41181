@@ -1,49 +1,2251 @@
-import React, { useState, useEffect } from 'react';
-import logo from './logo.svg';
-import './App.css';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./App.css";
+
+/**
+ * Ocean Professional theme tokens (kept local and lightweight).
+ * We keep UI self-contained in this file, using inline styles + minimal classNames.
+ */
+const THEME = {
+  primary: "#2563EB",
+  secondary: "#F59E0B",
+  background: "#f9fafb",
+  surface: "#ffffff",
+  text: "#111827",
+  mutedText: "#6B7280",
+  border: "rgba(17, 24, 39, 0.12)",
+  shadow: "0 10px 25px rgba(17, 24, 39, 0.08)",
+  shadowSm: "0 4px 12px rgba(17, 24, 39, 0.08)",
+};
+
+/** Mock data (no external service calls yet). */
+const MOCK_QUOTES = [
+  {
+    id: "q1",
+    destination: "Goa, India",
+    price: 27999,
+    nights: 4,
+    rating: 4.7,
+    tags: ["Beaches", "Food", "Adventure"],
+  },
+  {
+    id: "q2",
+    destination: "Jaipur, India",
+    price: 18999,
+    nights: 3,
+    rating: 4.5,
+    tags: ["Culture", "City", "Food"],
+  },
+  {
+    id: "q3",
+    destination: "Bali, Indonesia",
+    price: 74999,
+    nights: 6,
+    rating: 4.8,
+    tags: ["Beaches", "Adventure", "Culture"],
+  },
+  {
+    id: "q4",
+    destination: "Dubai, UAE",
+    price: 89999,
+    nights: 5,
+    rating: 4.6,
+    tags: ["City", "Food", "Adventure"],
+  },
+  {
+    id: "q5",
+    destination: "Manali, India",
+    price: 22999,
+    nights: 4,
+    rating: 4.4,
+    tags: ["Mountains", "Adventure", "Culture"],
+  },
+  {
+    id: "q6",
+    destination: "Paris, France",
+    price: 159999,
+    nights: 6,
+    rating: 4.9,
+    tags: ["City", "Culture", "Food"],
+  },
+];
+
+const MOCK_REVIEWS = [
+  {
+    id: "r1",
+    name: "Aarav",
+    date: "2025-05-12",
+    destination: "Goa",
+    rating: 5,
+    text: "Planner suggestions were spot-on. Great beach stays within budget and smooth day-by-day flow.",
+  },
+  {
+    id: "r2",
+    name: "Meera",
+    date: "2025-04-03",
+    destination: "Bali",
+    rating: 4,
+    text: "Loved the itinerary structure and interest-based picks. Would like more filters for hotel category.",
+  },
+  {
+    id: "r3",
+    name: "Kabir",
+    date: "2025-02-22",
+    destination: "Dubai",
+    rating: 5,
+    text: "Quick options, clear pricing examples, and easy-to-follow plan. Perfect for a short city break.",
+  },
+  {
+    id: "r4",
+    name: "Sana",
+    date: "2025-01-17",
+    destination: "Jaipur",
+    rating: 4,
+    text: "Culture and food recommendations were excellent. UI feels premium and easy on mobile.",
+  },
+];
+
+/**
+ * Best-effort, dependency-safe Supabase initializer.
+ * - Do NOT add dependencies.
+ * - If @supabase/supabase-js is missing, app must still compile/run.
+ *
+ * NOTE: Because this uses dynamic import, it won't fail builds when supabase-js isn't installed.
+ */
+// PUBLIC_INTERFACE
+async function tryCreateSupabaseClient() {
+  /** This is a public function. */
+  const url = process.env.REACT_APP_SUPABASE_URL;
+  const key = process.env.REACT_APP_SUPABASE_KEY;
+
+  if (!url || !key) return null;
+
+  try {
+    // Dynamic import keeps the bundle safe even if dependency isn't installed.
+    const mod = await import("@supabase/supabase-js");
+    const createClient =
+      mod?.createClient || mod?.default?.createClient || mod?.default;
+    if (typeof createClient !== "function") return null;
+    return createClient(url, key);
+  } catch (e) {
+    // Dependency missing or other load issue; gracefully degrade.
+    return null;
+  }
+}
+
+/**
+ * Formatting helpers
+ */
+function formatINR(amount) {
+  try {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `₹${amount}`;
+  }
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function initialsFromName(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return "U";
+  const first = parts[0]?.[0] || "U";
+  const last = (parts.length > 1 ? parts[parts.length - 1]?.[0] : "") || "";
+  return (first + last).toUpperCase();
+}
+
+function toISODateLocal(d) {
+  // yyyy-mm-dd for <input type="date">
+  const pad = (x) => String(x).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+const INTERESTS = [
+  "Beaches",
+  "Mountains",
+  "City",
+  "Culture",
+  "Food",
+  "Adventure",
+];
 
 // PUBLIC_INTERFACE
 function App() {
-  const [theme, setTheme] = useState('light');
+  /** This is a public function. */
+  const [activeNav, setActiveNav] = useState("home");
 
-  // Effect to apply theme to document element
+  // Planner state
+  const todayISO = useMemo(() => toISODateLocal(new Date()), []);
+  const defaultEndISO = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return toISODateLocal(d);
+  }, []);
+
+  const [planner, setPlanner] = useState({
+    destination: "",
+    tripType: "Domestic",
+    nights: 4,
+    budget: 50000,
+    travelers: 2,
+    startDate: todayISO,
+    endDate: defaultEndISO,
+    interests: new Set(["Beaches", "Food"]),
+  });
+
+  const [validation, setValidation] = useState({});
+  const [planResult, setPlanResult] = useState(null);
+  const [isPlanning, setIsPlanning] = useState(false);
+
+  // Quotes
+  const [quoteSeed, setQuoteSeed] = useState(1);
+  const [quotes, setQuotes] = useState(() => pickQuotes(MOCK_QUOTES, 3, 1));
+
+  // Auth placeholder state
+  const [supabaseAvailable, setSupabaseAvailable] = useState(false);
+  const supabaseRef = useRef(null);
+
+  // Sticky header shadow on scroll (small UX polish)
+  const [scrolled, setScrolled] = useState(false);
+
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
+    let isMounted = true;
+    (async () => {
+      const client = await tryCreateSupabaseClient();
+      if (!isMounted) return;
+      supabaseRef.current = client;
+      setSupabaseAvailable(Boolean(client));
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const y = window.scrollY || 0;
+      setScrolled(y > 4);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    setQuotes(pickQuotes(MOCK_QUOTES, 3, quoteSeed));
+  }, [quoteSeed]);
+
+  // Smooth anchor behavior + active section tracking
+  useEffect(() => {
+    const sectionIds = [
+      "home",
+      "planner",
+      "quotes",
+      "reviews",
+      "about",
+      "contact",
+      "policies",
+    ];
+
+    const handler = () => {
+      // Find the closest section to the top
+      const headerOffset = 84;
+      const candidates = sectionIds
+        .map((id) => {
+          const el = document.getElementById(id);
+          if (!el) return null;
+          const top = el.getBoundingClientRect().top;
+          return { id, top };
+        })
+        .filter(Boolean);
+
+      const best = candidates
+        .filter((c) => c.top <= headerOffset + 16)
+        .sort((a, b) => b.top - a.top)[0];
+
+      if (best && best.id !== activeNav) setActiveNav(best.id);
+      if (!best && activeNav !== "home") setActiveNav("home");
+    };
+
+    window.addEventListener("scroll", handler, { passive: true });
+    handler();
+    return () => window.removeEventListener("scroll", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNav]);
+
+  const layout = useMemo(
+    () => ({
+      page: {
+        minHeight: "100vh",
+        background: `radial-gradient(800px 400px at 20% 0%, rgba(37, 99, 235, 0.12), transparent 60%),
+                     radial-gradient(900px 500px at 80% 10%, rgba(245, 158, 11, 0.10), transparent 55%),
+                     ${THEME.background}`,
+        color: THEME.text,
+      },
+      container: {
+        maxWidth: 1120,
+        margin: "0 auto",
+        padding: "0 16px",
+      },
+      section: {
+        padding: "42px 0",
+      },
+      sectionTitle: {
+        fontSize: 22,
+        lineHeight: 1.2,
+        margin: "0 0 10px",
+        letterSpacing: "-0.02em",
+      },
+      sectionSubtitle: {
+        margin: "0 0 18px",
+        color: THEME.mutedText,
+        maxWidth: 820,
+      },
+      card: {
+        background: THEME.surface,
+        border: `1px solid ${THEME.border}`,
+        borderRadius: 16,
+        boxShadow: THEME.shadowSm,
+      },
+    }),
+    []
+  );
 
   // PUBLIC_INTERFACE
-  const toggleTheme = () => {
-    setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
+  const onNavClick = (id) => {
+    /** This is a public function. */
+    const el = document.getElementById(id);
+    if (!el) return;
+    const headerOffset = 72;
+    const top =
+      el.getBoundingClientRect().top + (window.scrollY || 0) - headerOffset;
+    window.scrollTo({ top, behavior: "smooth" });
+    setActiveNav(id);
+  };
+
+  // PUBLIC_INTERFACE
+  const refreshQuotes = () => {
+    /** This is a public function. */
+    setQuoteSeed((s) => s + 1);
+  };
+
+  // PUBLIC_INTERFACE
+  const signInWithGoogle = async () => {
+    /** This is a public function. */
+    // Future integration: handle actual auth state, user profile, session persistence, etc.
+    if (!supabaseRef.current) return;
+
+    try {
+      // We keep this a safe placeholder. In future: use supabase.auth.signInWithOAuth({...})
+      // Doing a no-op action, as requested.
+      // eslint-disable-next-line no-alert
+      alert(
+        "Google Sign-In placeholder.\n\nFuture: Supabase OAuth sign-in will be enabled here."
+      );
+      // eslint-disable-next-line no-console
+      console.log("Supabase client ready:", supabaseRef.current);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("Sign-in placeholder error:", e);
+    }
+  };
+
+  // PUBLIC_INTERFACE
+  const updatePlannerField = (key, value) => {
+    /** This is a public function. */
+    setPlanner((p) => ({ ...p, [key]: value }));
+  };
+
+  // PUBLIC_INTERFACE
+  const toggleInterest = (interest) => {
+    /** This is a public function. */
+    setPlanner((p) => {
+      const next = new Set(p.interests);
+      if (next.has(interest)) next.delete(interest);
+      else next.add(interest);
+      return { ...p, interests: next };
+    });
+  };
+
+  // PUBLIC_INTERFACE
+  const validatePlanner = () => {
+    /** This is a public function. */
+    const errors = {};
+    const destination = planner.destination.trim();
+
+    if (!destination) errors.destination = "Please enter a destination.";
+    if (destination.length > 60)
+      errors.destination = "Destination is too long (max 60 characters).";
+
+    const nights = Number(planner.nights);
+    if (!Number.isFinite(nights) || nights < 1 || nights > 60) {
+      errors.nights = "Nights must be between 1 and 60.";
+    }
+
+    const budget = Number(planner.budget);
+    if (!Number.isFinite(budget) || budget < 1000) {
+      errors.budget = "Budget must be at least 1,000.";
+    }
+
+    const travelers = Number(planner.travelers);
+    if (!Number.isFinite(travelers) || travelers < 1 || travelers > 12) {
+      errors.travelers = "Travelers must be between 1 and 12.";
+    }
+
+    if (!planner.startDate) errors.startDate = "Select a start date.";
+    if (!planner.endDate) errors.endDate = "Select an end date.";
+
+    if (planner.startDate && planner.endDate) {
+      const s = new Date(planner.startDate);
+      const e = new Date(planner.endDate);
+      if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
+        errors.dates = "Please provide valid dates.";
+      } else if (e < s) {
+        errors.dates = "End date must be after start date.";
+      }
+    }
+
+    if (!planner.interests || planner.interests.size === 0) {
+      errors.interests = "Select at least one interest.";
+    }
+
+    setValidation(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // PUBLIC_INTERFACE
+  const onPlanTrip = async (e) => {
+    /** This is a public function. */
+    e.preventDefault();
+
+    if (!validatePlanner()) {
+      setPlanResult(null);
+      return;
+    }
+
+    setIsPlanning(true);
+    setPlanResult(null);
+
+    // Mock search handling: in future, call backend / quotes / itinerary generator.
+    // Keeping it local-only per requirements.
+    await new Promise((r) => setTimeout(r, 450));
+
+    const matchedQuotes = MOCK_QUOTES.filter((q) => {
+      const withinBudget = q.price <= Number(planner.budget) * 1.15;
+      const typeMatch =
+        planner.tripType === "Domestic"
+          ? /india/i.test(q.destination)
+          : !/india/i.test(q.destination);
+      const interestMatch = q.tags.some((t) => planner.interests.has(t));
+      return withinBudget && typeMatch && interestMatch;
+    });
+
+    const top = matchedQuotes.length
+      ? pickQuotes(matchedQuotes, 3, quoteSeed + 10)
+      : quotes;
+
+    setPlanResult({
+      summary: `Plan ready for ${planner.destination} • ${planner.nights} night(s) • ${planner.tripType}`,
+      tips: [
+        `Use interests (${Array.from(planner.interests).join(
+          ", "
+        )}) to refine experiences.`,
+        `Try shifting dates for better prices and availability.`,
+        `Save your quote and book later when you're ready.`,
+      ],
+      recommendedQuotes: top,
+    });
+
+    setIsPlanning(false);
+
+    // Bring user to quotes section after planning.
+    onNavClick("quotes");
+  };
+
+  const headerStyles = useMemo(
+    () => ({
+      shell: {
+        position: "sticky",
+        top: 0,
+        zIndex: 20,
+        backdropFilter: "saturate(180%) blur(12px)",
+        background: "rgba(249, 250, 251, 0.82)",
+        borderBottom: `1px solid ${
+          scrolled ? "rgba(17, 24, 39, 0.14)" : "rgba(17, 24, 39, 0.10)"
+        }`,
+        boxShadow: scrolled ? "0 10px 25px rgba(17, 24, 39, 0.08)" : "none",
+        transition: "box-shadow 180ms ease, border-color 180ms ease",
+      },
+      row: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "12px 0",
+      },
+      brand: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        minWidth: 200,
+        textAlign: "left",
+      },
+      logo: {
+        width: 36,
+        height: 36,
+        borderRadius: 12,
+        background: `linear-gradient(135deg, ${THEME.primary}, ${THEME.secondary})`,
+        boxShadow: THEME.shadowSm,
+      },
+      titleWrap: { display: "flex", flexDirection: "column" },
+      title: {
+        fontSize: 16,
+        fontWeight: 800,
+        letterSpacing: "-0.02em",
+        margin: 0,
+        lineHeight: 1.1,
+      },
+      subtitle: {
+        margin: 0,
+        fontSize: 12,
+        color: THEME.mutedText,
+      },
+      nav: {
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        flexWrap: "wrap",
+        justifyContent: "center",
+      },
+      navBtn: (active) => ({
+        appearance: "none",
+        border: `1px solid ${active ? "rgba(37, 99, 235, 0.25)" : "transparent"}`,
+        background: active ? "rgba(37, 99, 235, 0.10)" : "transparent",
+        color: THEME.text,
+        padding: "8px 10px",
+        borderRadius: 999,
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: "pointer",
+        transition:
+          "background 160ms ease, border-color 160ms ease, transform 120ms ease",
+        outline: "none",
+      }),
+      navBtnFocus: {
+        boxShadow: `0 0 0 4px rgba(37, 99, 235, 0.18)`,
+      },
+      right: { display: "flex", gap: 10, alignItems: "center", minWidth: 240 },
+    }),
+    [scrolled]
+  );
+
+  const primaryBtn = useMemo(
+    () => ({
+      appearance: "none",
+      border: "1px solid rgba(37, 99, 235, 0.35)",
+      background: `linear-gradient(135deg, ${THEME.primary}, #1D4ED8)`,
+      color: "#fff",
+      padding: "10px 14px",
+      borderRadius: 12,
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: "pointer",
+      boxShadow: THEME.shadowSm,
+      transition: "transform 120ms ease, box-shadow 150ms ease, opacity 150ms",
+      outline: "none",
+      whiteSpace: "nowrap",
+    }),
+    []
+  );
+
+  const secondaryBtn = useMemo(
+    () => ({
+      appearance: "none",
+      border: `1px solid ${THEME.border}`,
+      background: THEME.surface,
+      color: THEME.text,
+      padding: "10px 14px",
+      borderRadius: 12,
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: "pointer",
+      boxShadow: "none",
+      transition: "transform 120ms ease, box-shadow 150ms ease, opacity 150ms",
+      outline: "none",
+      whiteSpace: "nowrap",
+    }),
+    []
+  );
+
+  const googleBtn = useMemo(
+    () => ({
+      appearance: "none",
+      border: `1px solid ${THEME.border}`,
+      background: THEME.surface,
+      color: THEME.text,
+      padding: "10px 12px",
+      borderRadius: 12,
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: supabaseAvailable ? "pointer" : "not-allowed",
+      opacity: supabaseAvailable ? 1 : 0.6,
+      boxShadow: "none",
+      outline: "none",
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      whiteSpace: "nowrap",
+    }),
+    [supabaseAvailable]
+  );
+
+  return (
+    <div style={layout.page}>
+      <a
+        href="#planner"
+        style={{
+          position: "absolute",
+          left: 8,
+          top: -40,
+          background: THEME.surface,
+          padding: "8px 10px",
+          borderRadius: 10,
+          border: `1px solid ${THEME.border}`,
+          color: THEME.text,
+          textDecoration: "none",
+          fontWeight: 700,
+        }}
+        onFocus={(e) => {
+          e.currentTarget.style.top = "8px";
+        }}
+        onBlur={(e) => {
+          e.currentTarget.style.top = "-40px";
+        }}
+      >
+        Skip to planner
+      </a>
+
+      <header style={headerStyles.shell} aria-label="Primary header">
+        <div style={layout.container}>
+          <div style={headerStyles.row}>
+            <div style={headerStyles.brand} aria-label="WEGO brand">
+              <div style={headerStyles.logo} aria-hidden="true" />
+              <div style={headerStyles.titleWrap}>
+                <p style={headerStyles.title}>WEGO Travel Planner</p>
+                <p style={headerStyles.subtitle}>
+                  Plan smarter • Discover more • Book later
+                </p>
+              </div>
+            </div>
+
+            <nav style={headerStyles.nav} aria-label="Primary navigation">
+              <NavItem
+                label="Home"
+                targetId="home"
+                active={activeNav === "home"}
+                onClick={onNavClick}
+                styleFn={headerStyles.navBtn}
+              />
+              <NavItem
+                label="Planner"
+                targetId="planner"
+                active={activeNav === "planner"}
+                onClick={onNavClick}
+                styleFn={headerStyles.navBtn}
+              />
+              <NavItem
+                label="Quotes"
+                targetId="quotes"
+                active={activeNav === "quotes"}
+                onClick={onNavClick}
+                styleFn={headerStyles.navBtn}
+              />
+              <NavItem
+                label="Reviews"
+                targetId="reviews"
+                active={activeNav === "reviews"}
+                onClick={onNavClick}
+                styleFn={headerStyles.navBtn}
+              />
+              <NavItem
+                label="About"
+                targetId="about"
+                active={activeNav === "about"}
+                onClick={onNavClick}
+                styleFn={headerStyles.navBtn}
+              />
+              <NavItem
+                label="Contact"
+                targetId="contact"
+                active={activeNav === "contact"}
+                onClick={onNavClick}
+                styleFn={headerStyles.navBtn}
+              />
+              <NavItem
+                label="Policies"
+                targetId="policies"
+                active={activeNav === "policies"}
+                onClick={onNavClick}
+                styleFn={headerStyles.navBtn}
+              />
+            </nav>
+
+            <div style={headerStyles.right}>
+              <button
+                type="button"
+                style={googleBtn}
+                onClick={supabaseAvailable ? signInWithGoogle : undefined}
+                disabled={!supabaseAvailable}
+                aria-disabled={!supabaseAvailable}
+                title={
+                  supabaseAvailable
+                    ? "Google Sign-In (placeholder)"
+                    : "Disabled: Set REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_KEY and ensure @supabase/supabase-js is installed."
+                }
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 8,
+                    background:
+                      "linear-gradient(135deg, rgba(17,24,39,0.08), rgba(17,24,39,0.02))",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: `1px solid ${THEME.border}`,
+                    fontSize: 12,
+                    fontWeight: 900,
+                  }}
+                >
+                  G
+                </span>
+                Google Sign-In
+              </button>
+
+              <button
+                type="button"
+                style={secondaryBtn}
+                onClick={refreshQuotes}
+                aria-label="Refresh quote suggestions"
+                title="Refresh quote suggestions"
+              >
+                Refresh Quotes
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        {/* HOME / HERO */}
+        <section id="home" style={{ ...layout.section, paddingTop: 34 }}>
+          <div style={layout.container}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.15fr 0.85fr",
+                gap: 18,
+                alignItems: "stretch",
+              }}
+            >
+              <div
+                style={{
+                  ...layout.card,
+                  padding: 20,
+                  background:
+                    "linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(245, 158, 11, 0.08))",
+                }}
+              >
+                <h1
+                  style={{
+                    margin: "0 0 10px",
+                    fontSize: 34,
+                    letterSpacing: "-0.03em",
+                    lineHeight: 1.1,
+                  }}
+                >
+                  Your next trip, planned in minutes.
+                </h1>
+                <p style={{ margin: "0 0 14px", color: THEME.mutedText }}>
+                  WEGO helps you plan trips around budget, duration, and what you
+                  actually love doing. Start with the planner, browse curated
+                  quote ideas, and book later when ready.
+                </p>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 10,
+                    marginTop: 12,
+                  }}
+                  aria-label="Quick actions"
+                >
+                  <button
+                    type="button"
+                    style={primaryBtn}
+                    onClick={() => onNavClick("planner")}
+                  >
+                    Plan a Trip
+                  </button>
+                  <button
+                    type="button"
+                    style={secondaryBtn}
+                    onClick={() => onNavClick("quotes")}
+                  >
+                    Browse Quotes
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 16,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  <StatChip label="Budget-aware" value="Smart picks" />
+                  <StatChip label="Interests-based" value="Curated vibes" />
+                  <StatChip label="No booking pressure" value="Save & decide" />
+                </div>
+              </div>
+
+              <div style={{ ...layout.card, padding: 18 }}>
+                <h2 style={{ ...layout.sectionTitle, marginBottom: 12 }}>
+                  Today’s highlights
+                </h2>
+                <p style={{ ...layout.sectionSubtitle, marginBottom: 14 }}>
+                  Fresh, mocked quote suggestions (backend integration will
+                  replace this soon).
+                </p>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr",
+                    gap: 10,
+                  }}
+                >
+                  {quotes.slice(0, 2).map((q) => (
+                    <QuoteCard
+                      key={q.id}
+                      quote={q}
+                      compact
+                      onCta={() => {
+                        // Future integration: route to quote details page
+                        // eslint-disable-next-line no-alert
+                        alert(
+                          `View Details placeholder\n\nDestination: ${q.destination}\nSample price: ${formatINR(
+                            q.price
+                          )}`
+                        );
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* PLANNER */}
+        <section id="planner" style={layout.section} aria-label="Planner section">
+          <div style={layout.container}>
+            <h2 style={layout.sectionTitle}>Planner</h2>
+            <p style={layout.sectionSubtitle}>
+              Enter your trip preferences. We’ll validate locally and suggest
+              matching quote ideas. (Future: generate a full itinerary and fetch
+              real prices.)
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.15fr 0.85fr",
+                gap: 18,
+                alignItems: "start",
+              }}
+            >
+              <PlannerPanel
+                planner={planner}
+                validation={validation}
+                isPlanning={isPlanning}
+                onSubmit={onPlanTrip}
+                onFieldChange={updatePlannerField}
+                onToggleInterest={toggleInterest}
+              />
+
+              <div style={{ ...layout.card, padding: 16 }}>
+                <h3
+                  style={{
+                    margin: "0 0 10px",
+                    fontSize: 16,
+                    letterSpacing: "-0.01em",
+                  }}
+                >
+                  Helper hints
+                </h3>
+
+                <Hint
+                  title="Destination"
+                  text="Try city + country (e.g., “Bali, Indonesia”)."
+                />
+                <Hint
+                  title="Budget"
+                  text="Set a flexible ceiling; prices shown are sample estimates."
+                />
+                <Hint
+                  title="Interests"
+                  text="Pick what matters most—WEGO prioritizes matching experiences."
+                />
+
+                <div
+                  style={{
+                    marginTop: 14,
+                    padding: 12,
+                    borderRadius: 14,
+                    border: `1px solid ${THEME.border}`,
+                    background:
+                      "linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(245, 158, 11, 0.05))",
+                  }}
+                >
+                  <p style={{ margin: 0, fontWeight: 800 }}>
+                    Tip: Save time with Google Sign-In
+                  </p>
+                  <p style={{ margin: "6px 0 0", color: THEME.mutedText }}>
+                    Auth is a placeholder today. Next iteration will unlock saved
+                    plans, favorites, and one-tap checkout.
+                  </p>
+                </div>
+
+                {planResult ? (
+                  <div style={{ marginTop: 16 }}>
+                    <h4 style={{ margin: "0 0 8px" }}>Latest plan</h4>
+                    <div
+                      style={{
+                        padding: 12,
+                        borderRadius: 14,
+                        background: THEME.background,
+                        border: `1px solid ${THEME.border}`,
+                      }}
+                    >
+                      <p style={{ margin: 0, fontWeight: 800 }}>
+                        {planResult.summary}
+                      </p>
+                      <ul
+                        style={{
+                          margin: "8px 0 0",
+                          paddingLeft: 18,
+                          color: THEME.mutedText,
+                        }}
+                      >
+                        {planResult.tips.map((t, idx) => (
+                          <li key={idx}>{t}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 16 }}>
+                    <h4 style={{ margin: "0 0 8px" }}>Preview</h4>
+                    <p style={{ margin: 0, color: THEME.mutedText }}>
+                      Submit the planner to generate a quick summary and matching
+                      quote suggestions.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* QUOTES */}
+        <section id="quotes" style={layout.section} aria-label="Quotes section">
+          <div style={layout.container}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "end",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                marginBottom: 12,
+              }}
+            >
+              <div>
+                <h2 style={layout.sectionTitle}>Quotes</h2>
+                <p style={{ ...layout.sectionSubtitle, marginBottom: 0 }}>
+                  Dynamic quote cards (mocked). Refresh anytime or plan a trip to
+                  get more relevant suggestions.
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  style={secondaryBtn}
+                  onClick={() => onNavClick("planner")}
+                >
+                  Update preferences
+                </button>
+                <button type="button" style={primaryBtn} onClick={refreshQuotes}>
+                  Rotate quotes
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                gap: 12,
+              }}
+            >
+              {(planResult?.recommendedQuotes || quotes).map((q) => (
+                <QuoteCard
+                  key={q.id}
+                  quote={q}
+                  onCta={() => {
+                    // Future integration: route to quote details / booking flow
+                    // eslint-disable-next-line no-alert
+                    alert(
+                      `Book later placeholder\n\nWe will add “Save quote” + checkout later.\nDestination: ${q.destination}`
+                    );
+                  }}
+                />
+              ))}
+            </div>
+
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                borderRadius: 16,
+                background: THEME.surface,
+                border: `1px dashed rgba(37, 99, 235, 0.35)`,
+                color: THEME.mutedText,
+              }}
+              role="note"
+              aria-label="Quotes note"
+            >
+              Prices and ratings shown are mocked locally. Future iterations will
+              integrate real inventory and live pricing.
+            </div>
+          </div>
+        </section>
+
+        {/* REVIEWS */}
+        <section
+          id="reviews"
+          style={layout.section}
+          aria-label="Reviews section"
+        >
+          <div style={layout.container}>
+            <h2 style={layout.sectionTitle}>Reviews</h2>
+            <p style={layout.sectionSubtitle}>
+              What travelers say about planning with WEGO (sample data for now).
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 12,
+              }}
+            >
+              {MOCK_REVIEWS.map((r) => (
+                <ReviewItem key={r.id} review={r} />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ABOUT */}
+        <section id="about" style={layout.section} aria-label="About section">
+          <div style={layout.container}>
+            <h2 style={layout.sectionTitle}>About WEGO</h2>
+            <p style={layout.sectionSubtitle}>
+              WEGO is built to make travel planning fast, transparent, and
+              delightful—without forcing bookings. Today’s UI is a foundation for
+              future integrations: live quotes, saved itineraries, and secure
+              authentication.
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                gap: 12,
+              }}
+            >
+              <InfoCard
+                title="Modern planning"
+                text="Budget, duration, trip type, and interests—all in one panel."
+              />
+              <InfoCard
+                title="Curated suggestions"
+                text="Mocked quote rotation now. Future: real-time inventory and smart ranking."
+              />
+              <InfoCard
+                title="Trust & clarity"
+                text="Clear policies, simple contact options, and accessible UI."
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* CONTACT */}
+        <section
+          id="contact"
+          style={layout.section}
+          aria-label="Contact section"
+        >
+          <div style={layout.container}>
+            <h2 style={layout.sectionTitle}>Contact Us</h2>
+            <p style={layout.sectionSubtitle}>
+              Have feedback or partnership inquiries? Send a message below. (No-op
+              submit for now.)
+            </p>
+
+            <div style={{ ...layout.card, padding: 16 }}>
+              <ContactForm />
+            </div>
+          </div>
+        </section>
+
+        {/* POLICIES */}
+        <section
+          id="policies"
+          style={{ ...layout.section, paddingBottom: 62 }}
+          aria-label="Policies section"
+        >
+          <div style={layout.container}>
+            <h2 style={layout.sectionTitle}>Infringement & Policies</h2>
+            <p style={layout.sectionSubtitle}>
+              These are placeholders for your legal pages. Add full policy text
+              and links when ready.
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.15fr 0.85fr",
+                gap: 12,
+              }}
+            >
+              <div style={{ ...layout.card, padding: 16 }}>
+                <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>
+                  Infringement notice
+                </h3>
+                <p style={{ margin: 0, color: THEME.mutedText }}>
+                  If you believe content infringes your rights, please contact us
+                  with supporting details. We’ll review and respond promptly.
+                </p>
+              </div>
+
+              <div style={{ ...layout.card, padding: 16 }}>
+                <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Quick links</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, color: THEME.mutedText }}>
+                  <li>
+                    <a
+                      href="#policies"
+                      onClick={(e) => e.preventDefault()}
+                      style={linkStyle()}
+                      aria-label="Privacy Policy (placeholder)"
+                      title="Placeholder"
+                    >
+                      Privacy Policy
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      href="#policies"
+                      onClick={(e) => e.preventDefault()}
+                      style={linkStyle()}
+                      aria-label="Terms of Service (placeholder)"
+                      title="Placeholder"
+                    >
+                      Terms of Service
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      href="#policies"
+                      onClick={(e) => e.preventDefault()}
+                      style={linkStyle()}
+                      aria-label="Cookie Policy (placeholder)"
+                      title="Placeholder"
+                    >
+                      Cookie Policy
+                    </a>
+                  </li>
+                </ul>
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 12,
+                    borderRadius: 14,
+                    border: `1px solid ${THEME.border}`,
+                    background: THEME.background,
+                    color: THEME.mutedText,
+                  }}
+                >
+                  <strong style={{ color: THEME.text }}>
+                    Upcoming features:
+                  </strong>{" "}
+                  booking, saved plans, and user accounts.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer
+        style={{
+          borderTop: `1px solid ${THEME.border}`,
+          background: "rgba(255, 255, 255, 0.65)",
+          padding: "18px 0",
+        }}
+        aria-label="Footer"
+      >
+        <div style={layout.container}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 10,
+                  background: `linear-gradient(135deg, ${THEME.primary}, ${THEME.secondary})`,
+                }}
+              />
+              <p style={{ margin: 0, color: THEME.mutedText, fontWeight: 700 }}>
+                © {new Date().getFullYear()} WEGO • Travel Planner UI
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => onNavClick("contact")}
+                style={{
+                  ...secondaryBtn,
+                  padding: "8px 12px",
+                  borderRadius: 999,
+                }}
+              >
+                Contact
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavClick("policies")}
+                style={{
+                  ...secondaryBtn,
+                  padding: "8px 12px",
+                  borderRadius: 999,
+                }}
+              >
+                Policies
+              </button>
+            </div>
+          </div>
+        </div>
+      </footer>
+
+      {/* Lightweight responsive overrides without needing additional CSS edits */}
+      <style>{`
+        @media (max-width: 980px) {
+          #home > div > div,
+          #planner > div > div,
+          #policies > div > div {
+            grid-template-columns: 1fr !important;
+          }
+
+          #quotes > div > div:nth-of-type(2) {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 820px) {
+          #quotes > div > div:nth-of-type(2) {
+            grid-template-columns: 1fr !important;
+          }
+          #reviews > div > div:nth-of-type(3) {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 720px) {
+          /* Quote + review grids */
+          #quotes > div > div:nth-of-type(2),
+          #reviews > div > div:nth-of-type(3) {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/**
+ * NAV ITEM
+ */
+// PUBLIC_INTERFACE
+function NavItem({ label, targetId, active, onClick, styleFn }) {
+  /** This is a public function. */
+  const [isFocused, setIsFocused] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(targetId)}
+      aria-current={active ? "page" : undefined}
+      aria-label={`Go to ${label}`}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
+      style={{
+        ...styleFn(active),
+        boxShadow: isFocused ? `0 0 0 4px rgba(37, 99, 235, 0.16)` : "none",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * PLANNER PANEL
+ */
+// PUBLIC_INTERFACE
+function PlannerPanel({
+  planner,
+  validation,
+  isPlanning,
+  onSubmit,
+  onFieldChange,
+  onToggleInterest,
+}) {
+  /** This is a public function. */
+  const fieldStyle = {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: `1px solid ${THEME.border}`,
+    background: THEME.surface,
+    outline: "none",
+    fontSize: 14,
+  };
+
+  const labelStyle = {
+    fontSize: 12,
+    fontWeight: 800,
+    marginBottom: 6,
+    display: "block",
+  };
+
+  const helpStyle = {
+    marginTop: 6,
+    color: THEME.mutedText,
+    fontSize: 12,
+  };
+
+  const errorStyle = {
+    marginTop: 6,
+    color: "#B91C1C",
+    fontSize: 12,
+    fontWeight: 700,
+  };
+
+  const panelCard = {
+    background: THEME.surface,
+    border: `1px solid ${THEME.border}`,
+    borderRadius: 16,
+    boxShadow: THEME.shadow,
+    overflow: "hidden",
+  };
+
+  const header = {
+    padding: 16,
+    borderBottom: `1px solid ${THEME.border}`,
+    background:
+      "linear-gradient(135deg, rgba(37, 99, 235, 0.07), rgba(245, 158, 11, 0.06))",
+  };
+
+  const body = { padding: 16 };
+
+  return (
+    <div style={panelCard} aria-label="Planner panel">
+      <div style={header}>
+        <h3 style={{ margin: 0, fontSize: 16, letterSpacing: "-0.01em" }}>
+          Trip preferences
+        </h3>
+        <p style={{ margin: "6px 0 0", color: THEME.mutedText }}>
+          Fill the essentials. Fields marked required help us shape suggestions.
+        </p>
+      </div>
+
+      <form onSubmit={onSubmit} style={body} noValidate>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 12,
+          }}
+        >
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle} htmlFor="destination">
+              Destination <span aria-hidden="true">*</span>
+            </label>
+            <input
+              id="destination"
+              name="destination"
+              type="text"
+              value={planner.destination}
+              onChange={(e) => onFieldChange("destination", e.target.value)}
+              placeholder="e.g., Bali, Indonesia"
+              style={{
+                ...fieldStyle,
+                borderColor: validation.destination ? "rgba(185, 28, 28, 0.4)" : THEME.border,
+              }}
+              aria-invalid={Boolean(validation.destination)}
+              aria-describedby="destination_help destination_error"
+              autoComplete="off"
+              required
+            />
+            <div id="destination_help" style={helpStyle}>
+              Keep it specific for better suggestions.
+            </div>
+            {validation.destination ? (
+              <div id="destination_error" style={errorStyle}>
+                {validation.destination}
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label style={labelStyle} htmlFor="tripType">
+              Trip type
+            </label>
+            <select
+              id="tripType"
+              name="tripType"
+              value={planner.tripType}
+              onChange={(e) => onFieldChange("tripType", e.target.value)}
+              style={fieldStyle}
+              aria-label="Trip type"
+            >
+              <option value="Domestic">Domestic</option>
+              <option value="International">International</option>
+            </select>
+            <div style={helpStyle}>
+              Domestic is matched to “India” destinations in mock data.
+            </div>
+          </div>
+
+          <div>
+            <label style={labelStyle} htmlFor="nights">
+              Duration (nights) <span aria-hidden="true">*</span>
+            </label>
+            <input
+              id="nights"
+              name="nights"
+              type="number"
+              min={1}
+              max={60}
+              value={planner.nights}
+              onChange={(e) => onFieldChange("nights", clamp(Number(e.target.value), 1, 60))}
+              style={{
+                ...fieldStyle,
+                borderColor: validation.nights ? "rgba(185, 28, 28, 0.4)" : THEME.border,
+              }}
+              aria-invalid={Boolean(validation.nights)}
+              aria-describedby="nights_help nights_error"
+              required
+            />
+            <div id="nights_help" style={helpStyle}>
+              1–60 nights.
+            </div>
+            {validation.nights ? (
+              <div id="nights_error" style={errorStyle}>
+                {validation.nights}
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label style={labelStyle} htmlFor="budget">
+              Budget (INR) <span aria-hidden="true">*</span>
+            </label>
+            <input
+              id="budget"
+              name="budget"
+              type="number"
+              min={1000}
+              value={planner.budget}
+              onChange={(e) => onFieldChange("budget", Math.max(0, Number(e.target.value)))}
+              style={{
+                ...fieldStyle,
+                borderColor: validation.budget ? "rgba(185, 28, 28, 0.4)" : THEME.border,
+              }}
+              aria-invalid={Boolean(validation.budget)}
+              aria-describedby="budget_help budget_error"
+              required
+            />
+            <div id="budget_help" style={helpStyle}>
+              Example: 50000 for mid-range trips.
+            </div>
+            {validation.budget ? (
+              <div id="budget_error" style={errorStyle}>
+                {validation.budget}
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label style={labelStyle} htmlFor="travelers">
+              Travelers <span aria-hidden="true">*</span>
+            </label>
+            <input
+              id="travelers"
+              name="travelers"
+              type="number"
+              min={1}
+              max={12}
+              value={planner.travelers}
+              onChange={(e) =>
+                onFieldChange("travelers", clamp(Number(e.target.value), 1, 12))
+              }
+              style={{
+                ...fieldStyle,
+                borderColor: validation.travelers ? "rgba(185, 28, 28, 0.4)" : THEME.border,
+              }}
+              aria-invalid={Boolean(validation.travelers)}
+              aria-describedby="travelers_help travelers_error"
+              required
+            />
+            <div id="travelers_help" style={helpStyle}>
+              Great for solo, couples, and small groups.
+            </div>
+            {validation.travelers ? (
+              <div id="travelers_error" style={errorStyle}>
+                {validation.travelers}
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label style={labelStyle} htmlFor="startDate">
+              Start date <span aria-hidden="true">*</span>
+            </label>
+            <input
+              id="startDate"
+              name="startDate"
+              type="date"
+              value={planner.startDate}
+              onChange={(e) => onFieldChange("startDate", e.target.value)}
+              style={{
+                ...fieldStyle,
+                borderColor:
+                  validation.startDate || validation.dates
+                    ? "rgba(185, 28, 28, 0.4)"
+                    : THEME.border,
+              }}
+              aria-invalid={Boolean(validation.startDate || validation.dates)}
+              aria-describedby="dates_help dates_error"
+              required
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle} htmlFor="endDate">
+              End date <span aria-hidden="true">*</span>
+            </label>
+            <input
+              id="endDate"
+              name="endDate"
+              type="date"
+              value={planner.endDate}
+              onChange={(e) => onFieldChange("endDate", e.target.value)}
+              style={{
+                ...fieldStyle,
+                borderColor:
+                  validation.endDate || validation.dates
+                    ? "rgba(185, 28, 28, 0.4)"
+                    : THEME.border,
+              }}
+              aria-invalid={Boolean(validation.endDate || validation.dates)}
+              aria-describedby="dates_help dates_error"
+              required
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>
+                Interests <span aria-hidden="true">*</span>
+              </label>
+              <span id="dates_help" style={{ color: THEME.mutedText, fontSize: 12 }}>
+                Choose at least one.
+              </span>
+            </div>
+
+            <fieldset
+              style={{
+                border: "none",
+                padding: 0,
+                margin: "10px 0 0",
+              }}
+              aria-label="Interests"
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gap: 10,
+                }}
+              >
+                {INTERESTS.map((i) => {
+                  const checked = planner.interests.has(i);
+                  return (
+                    <label
+                      key={i}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: `1px solid ${
+                          checked ? "rgba(37, 99, 235, 0.35)" : THEME.border
+                        }`,
+                        background: checked
+                          ? "rgba(37, 99, 235, 0.08)"
+                          : THEME.surface,
+                        cursor: "pointer",
+                        userSelect: "none",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => onToggleInterest(i)}
+                        aria-label={i}
+                      />
+                      <span style={{ fontWeight: 700, fontSize: 13 }}>{i}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+
+            {validation.interests ? (
+              <div id="dates_error" style={errorStyle}>
+                {validation.interests}
+              </div>
+            ) : validation.dates ? (
+              <div id="dates_error" style={errorStyle}>
+                {validation.dates}
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="submit"
+                style={{
+                  appearance: "none",
+                  border: "1px solid rgba(37, 99, 235, 0.35)",
+                  background: `linear-gradient(135deg, ${THEME.primary}, #1D4ED8)`,
+                  color: "#fff",
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: isPlanning ? "progress" : "pointer",
+                  opacity: isPlanning ? 0.85 : 1,
+                  boxShadow: THEME.shadowSm,
+                }}
+                aria-busy={isPlanning}
+              >
+                {isPlanning ? "Planning..." : "Search / Plan Trip"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  // Quick reset (client-side only)
+                  const d = new Date();
+                  const end = new Date();
+                  end.setDate(end.getDate() + 7);
+                  onFieldChange("destination", "");
+                  onFieldChange("tripType", "Domestic");
+                  onFieldChange("nights", 4);
+                  onFieldChange("budget", 50000);
+                  onFieldChange("travelers", 2);
+                  onFieldChange("startDate", toISODateLocal(d));
+                  onFieldChange("endDate", toISODateLocal(end));
+                }}
+                style={{
+                  appearance: "none",
+                  border: `1px solid ${THEME.border}`,
+                  background: THEME.surface,
+                  color: THEME.text,
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                Reset
+              </button>
+            </div>
+
+            <p style={{ ...helpStyle, marginTop: 12 }}>
+              By continuing, you agree this is a demo experience. Future releases
+              will provide live pricing and booking.
+            </p>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * QUOTE CARD
+ */
+// PUBLIC_INTERFACE
+function QuoteCard({ quote, onCta, compact = false }) {
+  /** This is a public function. */
+  const ratingPct = (clamp(quote.rating, 0, 5) / 5) * 100;
+
+  return (
+    <div
+      style={{
+        background: THEME.surface,
+        border: `1px solid ${THEME.border}`,
+        borderRadius: 16,
+        padding: compact ? 12 : 14,
+        boxShadow: THEME.shadowSm,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        minHeight: compact ? "auto" : 180,
+      }}
+      aria-label={`Quote card for ${quote.destination}`}
+    >
+      <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 10 }}>
+        <div>
+          <p style={{ margin: 0, fontWeight: 900, letterSpacing: "-0.01em" }}>
+            {quote.destination}
+          </p>
+          <p style={{ margin: "6px 0 0", color: THEME.mutedText, fontSize: 13 }}>
+            Sample from <strong>{formatINR(quote.price)}</strong> • {quote.nights} night(s)
+          </p>
+        </div>
+
+        <div
+          aria-label={`Rating ${quote.rating} out of 5`}
+          style={{
+            minWidth: 86,
+            textAlign: "right",
+          }}
+        >
+          <div
+            style={{
+              position: "relative",
+              display: "inline-block",
+              lineHeight: 1,
+              fontSize: 14,
+              letterSpacing: 1,
+              color: "rgba(17, 24, 39, 0.22)",
+            }}
+          >
+            {"★★★★★"}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: `${ratingPct}%`,
+                overflow: "hidden",
+                color: THEME.secondary,
+                whiteSpace: "nowrap",
+              }}
+              aria-hidden="true"
+            >
+              {"★★★★★"}
+            </div>
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, color: THEME.mutedText }}>
+            {quote.rating.toFixed(1)} / 5
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {quote.tags.map((t) => (
+          <span
+            key={t}
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              padding: "6px 10px",
+              borderRadius: 999,
+              border: `1px solid ${THEME.border}`,
+              background: "rgba(17, 24, 39, 0.02)",
+              color: THEME.text,
+            }}
+          >
+            {t}
+          </span>
+        ))}
+      </div>
+
+      <div style={{ marginTop: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={onCta}
+          style={{
+            appearance: "none",
+            border: "1px solid rgba(37, 99, 235, 0.35)",
+            background: `linear-gradient(135deg, ${THEME.primary}, #1D4ED8)`,
+            color: "#fff",
+            padding: "10px 12px",
+            borderRadius: 12,
+            fontSize: 13,
+            fontWeight: 800,
+            cursor: "pointer",
+            boxShadow: THEME.shadowSm,
+            flex: 1,
+            minWidth: 140,
+          }}
+        >
+          {compact ? "View Details" : "Book later"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            // Future integration: add to favorites, saved quotes, etc.
+            // eslint-disable-next-line no-alert
+            alert("Saved placeholder: this quote will be saveable with auth soon.");
+          }}
+          style={{
+            appearance: "none",
+            border: `1px solid ${THEME.border}`,
+            background: THEME.surface,
+            color: THEME.text,
+            padding: "10px 12px",
+            borderRadius: 12,
+            fontSize: 13,
+            fontWeight: 800,
+            cursor: "pointer",
+            minWidth: 120,
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * REVIEW ITEM
+ */
+// PUBLIC_INTERFACE
+function ReviewItem({ review }) {
+  /** This is a public function. */
+  const ratingPct = (clamp(review.rating, 0, 5) / 5) * 100;
+
+  return (
+    <article
+      style={{
+        background: THEME.surface,
+        border: `1px solid ${THEME.border}`,
+        borderRadius: 16,
+        padding: 14,
+        boxShadow: THEME.shadowSm,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+      aria-label={`Review by ${review.name}`}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          aria-hidden="true"
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 14,
+            background:
+              "linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(245, 158, 11, 0.15))",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 900,
+            color: THEME.text,
+            border: `1px solid ${THEME.border}`,
+          }}
+        >
+          {initialsFromName(review.name)}
+        </div>
+
+        <div style={{ flex: 1 }}>
+          <p style={{ margin: 0, fontWeight: 900 }}>
+            {review.name}{" "}
+            <span style={{ color: THEME.mutedText, fontWeight: 700 }}>
+              • {review.destination}
+            </span>
+          </p>
+          <p style={{ margin: "4px 0 0", color: THEME.mutedText, fontSize: 12 }}>
+            {new Date(review.date).toLocaleDateString(undefined, {
+              year: "numeric",
+              month: "short",
+              day: "2-digit",
+            })}
+          </p>
+        </div>
+
+        <div
+          aria-label={`Rating ${review.rating} out of 5`}
+          style={{
+            minWidth: 80,
+            textAlign: "right",
+          }}
+        >
+          <div
+            style={{
+              position: "relative",
+              display: "inline-block",
+              lineHeight: 1,
+              fontSize: 14,
+              letterSpacing: 1,
+              color: "rgba(17, 24, 39, 0.22)",
+            }}
+          >
+            {"★★★★★"}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: `${ratingPct}%`,
+                overflow: "hidden",
+                color: THEME.secondary,
+                whiteSpace: "nowrap",
+              }}
+              aria-hidden="true"
+            >
+              {"★★★★★"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p style={{ margin: 0, color: THEME.text }}>{review.text}</p>
+    </article>
+  );
+}
+
+/**
+ * CONTACT FORM (no-op submit)
+ */
+// PUBLIC_INTERFACE
+function ContactForm() {
+  /** This is a public function. */
+  const [form, setForm] = useState({ name: "", email: "", message: "" });
+  const [touched, setTouched] = useState({});
+  const [status, setStatus] = useState("idle");
+
+  const errors = useMemo(() => {
+    const e = {};
+    if (touched.name && !form.name.trim()) e.name = "Name is required.";
+    if (touched.email) {
+      const v = form.email.trim();
+      if (!v) e.email = "Email is required.";
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
+        e.email = "Enter a valid email.";
+    }
+    if (touched.message && form.message.trim().length < 10)
+      e.message = "Message should be at least 10 characters.";
+    return e;
+  }, [form, touched]);
+
+  const fieldStyle = (hasError) => ({
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: `1px solid ${hasError ? "rgba(185, 28, 28, 0.35)" : THEME.border}`,
+    background: THEME.surface,
+    outline: "none",
+    fontSize: 14,
+  });
+
+  // PUBLIC_INTERFACE
+  const onSubmit = async (e) => {
+    /** This is a public function. */
+    e.preventDefault();
+    setTouched({ name: true, email: true, message: true });
+
+    const hasErrors =
+      !form.name.trim() ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) ||
+      form.message.trim().length < 10;
+
+    if (hasErrors) return;
+
+    setStatus("sending");
+    await new Promise((r) => setTimeout(r, 400));
+    setStatus("sent");
+
+    // No-op: future integration will send to backend / ticketing system
+    // eslint-disable-next-line no-console
+    console.log("Contact form placeholder submit:", form);
   };
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <button 
-          className="theme-toggle" 
-          onClick={toggleTheme}
-          aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-        >
-          {theme === 'light' ? '🌙 Dark' : '☀️ Light'}
-        </button>
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <p>
-          Current theme: <strong>{theme}</strong>
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <form onSubmit={onSubmit} noValidate aria-label="Contact form">
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: 12,
+        }}
+      >
+        <div>
+          <label
+            htmlFor="contact_name"
+            style={{ fontSize: 12, fontWeight: 900, display: "block", marginBottom: 6 }}
+          >
+            Name
+          </label>
+          <input
+            id="contact_name"
+            value={form.name}
+            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+            onBlur={() => setTouched((p) => ({ ...p, name: true }))}
+            style={fieldStyle(Boolean(errors.name))}
+            aria-invalid={Boolean(errors.name)}
+            aria-describedby="contact_name_err"
+            placeholder="Your name"
+          />
+          {errors.name ? (
+            <div id="contact_name_err" style={{ marginTop: 6, color: "#B91C1C", fontSize: 12, fontWeight: 800 }}>
+              {errors.name}
+            </div>
+          ) : null}
+        </div>
+
+        <div>
+          <label
+            htmlFor="contact_email"
+            style={{ fontSize: 12, fontWeight: 900, display: "block", marginBottom: 6 }}
+          >
+            Email
+          </label>
+          <input
+            id="contact_email"
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+            onBlur={() => setTouched((p) => ({ ...p, email: true }))}
+            style={fieldStyle(Boolean(errors.email))}
+            aria-invalid={Boolean(errors.email)}
+            aria-describedby="contact_email_err"
+            placeholder="you@example.com"
+          />
+          {errors.email ? (
+            <div id="contact_email_err" style={{ marginTop: 6, color: "#B91C1C", fontSize: 12, fontWeight: 800 }}>
+              {errors.email}
+            </div>
+          ) : null}
+        </div>
+
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label
+            htmlFor="contact_message"
+            style={{ fontSize: 12, fontWeight: 900, display: "block", marginBottom: 6 }}
+          >
+            Message
+          </label>
+          <textarea
+            id="contact_message"
+            value={form.message}
+            onChange={(e) => setForm((p) => ({ ...p, message: e.target.value }))}
+            onBlur={() => setTouched((p) => ({ ...p, message: true }))}
+            rows={4}
+            style={{
+              ...fieldStyle(Boolean(errors.message)),
+              resize: "vertical",
+            }}
+            aria-invalid={Boolean(errors.message)}
+            aria-describedby="contact_message_help contact_message_err"
+            placeholder="How can we help? (This is a demo – submission is a no-op)"
+          />
+          <div id="contact_message_help" style={{ marginTop: 6, color: THEME.mutedText, fontSize: 12 }}>
+            We’ll wire this to a real support channel soon.
+          </div>
+          {errors.message ? (
+            <div id="contact_message_err" style={{ marginTop: 6, color: "#B91C1C", fontSize: 12, fontWeight: 800 }}>
+              {errors.message}
+            </div>
+          ) : null}
+        </div>
+
+        <div style={{ gridColumn: "1 / -1", display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="submit"
+            style={{
+              appearance: "none",
+              border: "1px solid rgba(37, 99, 235, 0.35)",
+              background: `linear-gradient(135deg, ${THEME.primary}, #1D4ED8)`,
+              color: "#fff",
+              padding: "10px 14px",
+              borderRadius: 12,
+              fontSize: 14,
+              fontWeight: 900,
+              cursor: status === "sending" ? "progress" : "pointer",
+              boxShadow: THEME.shadowSm,
+              opacity: status === "sending" ? 0.85 : 1,
+            }}
+            aria-busy={status === "sending"}
+          >
+            {status === "sent" ? "Sent (demo)" : status === "sending" ? "Sending..." : "Send message"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setForm({ name: "", email: "", message: "" });
+              setTouched({});
+              setStatus("idle");
+            }}
+            style={{
+              appearance: "none",
+              border: `1px solid ${THEME.border}`,
+              background: THEME.surface,
+              color: THEME.text,
+              padding: "10px 14px",
+              borderRadius: 12,
+              fontSize: 14,
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            Clear
+          </button>
+
+          {status === "sent" ? (
+            <div style={{ alignSelf: "center", color: THEME.mutedText, fontWeight: 800 }}>
+              Thanks! (Saved to console only.)
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Small supporting UI elements
+ */
+// PUBLIC_INTERFACE
+function StatChip({ label, value }) {
+  /** This is a public function. */
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 16,
+        border: `1px solid ${THEME.border}`,
+        background: "rgba(255, 255, 255, 0.75)",
+      }}
+      aria-label={`${label}: ${value}`}
+    >
+      <p style={{ margin: 0, fontSize: 12, color: THEME.mutedText, fontWeight: 800 }}>
+        {label}
+      </p>
+      <p style={{ margin: "4px 0 0", fontSize: 14, fontWeight: 900 }}>{value}</p>
     </div>
   );
+}
+
+// PUBLIC_INTERFACE
+function Hint({ title, text }) {
+  /** This is a public function. */
+  return (
+    <div style={{ padding: "10px 0", borderBottom: `1px solid ${THEME.border}` }}>
+      <p style={{ margin: 0, fontWeight: 900 }}>{title}</p>
+      <p style={{ margin: "6px 0 0", color: THEME.mutedText }}>{text}</p>
+    </div>
+  );
+}
+
+// PUBLIC_INTERFACE
+function InfoCard({ title, text }) {
+  /** This is a public function. */
+  return (
+    <div
+      style={{
+        background: THEME.surface,
+        border: `1px solid ${THEME.border}`,
+        borderRadius: 16,
+        padding: 16,
+        boxShadow: THEME.shadowSm,
+      }}
+    >
+      <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>{title}</h3>
+      <p style={{ margin: 0, color: THEME.mutedText }}>{text}</p>
+    </div>
+  );
+}
+
+/**
+ * Quotes selection logic (deterministic shuffle by seed)
+ */
+// PUBLIC_INTERFACE
+function pickQuotes(all, count, seed) {
+  /** This is a public function. */
+  const arr = [...all];
+  // simple seeded shuffle
+  let s = seed || 1;
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    s = (s * 9301 + 49297) % 233280;
+    const j = Math.floor((s / 233280) * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, count);
+}
+
+function linkStyle() {
+  return {
+    color: THEME.primary,
+    fontWeight: 900,
+    textDecoration: "none",
+  };
 }
 
 export default App;
