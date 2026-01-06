@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
+import { supabase } from "./lib/supabaseClient";
 
 /**
  * Ocean Professional theme tokens (kept local and lightweight).
@@ -105,34 +106,6 @@ const MOCK_REVIEWS = [
 ];
 
 /**
- * Best-effort, dependency-safe Supabase initializer.
- * - Do NOT add dependencies.
- * - If @supabase/supabase-js is missing, app must still compile/run.
- *
- * NOTE: Because this uses dynamic import, it won't fail builds when supabase-js isn't installed.
- */
-// PUBLIC_INTERFACE
-async function tryCreateSupabaseClient() {
-  /** This is a public function. */
-  const url = process.env.REACT_APP_SUPABASE_URL;
-  const key = process.env.REACT_APP_SUPABASE_KEY;
-
-  if (!url || !key) return null;
-
-  try {
-    // Dynamic import keeps the bundle safe even if dependency isn't installed.
-    const mod = await import("@supabase/supabase-js");
-    const createClient =
-      mod?.createClient || mod?.default?.createClient || mod?.default;
-    if (typeof createClient !== "function") return null;
-    return createClient(url, key);
-  } catch (e) {
-    // Dependency missing or other load issue; gracefully degrade.
-    return null;
-  }
-}
-
-/**
  * Formatting helpers
  */
 function formatINR(amount) {
@@ -209,9 +182,10 @@ function App() {
   const [quoteSeed, setQuoteSeed] = useState(1);
   const [quotes, setQuotes] = useState(() => pickQuotes(MOCK_QUOTES, 3, 1));
 
-  // Auth placeholder state (keep best-effort supabase detection; auth remains stubbed)
-  const [supabaseAvailable, setSupabaseAvailable] = useState(false);
-  const supabaseRef = useRef(null);
+  // Auth state
+  const [user, setUser] = useState(null);
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
 
   // Sign-in prompt (modal)
   const [isSignInOpen, setIsSignInOpen] = useState(false);
@@ -219,18 +193,35 @@ function App() {
   // Sticky header shadow on scroll (small UX polish)
   const [scrolled, setScrolled] = useState(false);
 
-  // IMPORTANT: no scrolling / hash manipulation on mount. Keep this effect for supabase detection only.
+  // Track auth on mount and on auth changes.
   useEffect(() => {
     let isMounted = true;
+
     (async () => {
-      const client = await tryCreateSupabaseClient();
-      if (!isMounted) return;
-      supabaseRef.current = client;
-      setSupabaseAvailable(Boolean(client));
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (!isMounted) return;
+        if (error) {
+          // Not fatal; can happen if there is no session.
+          setUser(null);
+          return;
+        }
+        setUser(data?.user ?? null);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to read auth user:", e);
+        if (isMounted) setUser(null);
+      }
     })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Keep it minimal: only update user state.
+      setUser(session?.user ?? null);
+    });
 
     return () => {
       isMounted = false;
+      sub?.subscription?.unsubscribe?.();
     };
   }, []);
 
@@ -366,24 +357,50 @@ function App() {
   // PUBLIC_INTERFACE
   const signInWithGoogle = async () => {
     /** This is a public function. */
-    // Placeholder by request: do not require Supabase config yet.
-    // In the future, this will call: supabase.auth.signInWithOAuth({ provider: "google", ... })
+    setAuthError("");
+    setAuthBusy(true);
+
     try {
-      // eslint-disable-next-line no-alert
-      alert(
-        supabaseRef.current
-          ? "Google Sign-In placeholder.\n\nFuture: Supabase OAuth sign-in will be enabled here."
-          : "Google Sign-In placeholder.\n\nSupabase is not configured yet. This will be wired up in a future update."
-      );
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          // Keep it deterministic; after OAuth, return to the same origin.
+          redirectTo: window.location.origin,
+        },
+      });
+
+      if (error) {
+        setAuthError(error.message || "Unable to start Google sign-in.");
+      }
+      // On success, browser will redirect to Google, then back to redirectTo.
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.error("Sign-in placeholder error:", e);
+      console.error("Google sign-in error:", e);
+      setAuthError("Something went wrong starting sign-in. Please try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  // PUBLIC_INTERFACE
+  const signOut = async () => {
+    /** This is a public function. */
+    setAuthError("");
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) setAuthError(error.message || "Sign out failed.");
+      // user state will be updated by onAuthStateChange
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("Sign out error:", e);
+      setAuthError("Something went wrong signing out.");
     }
   };
 
   // PUBLIC_INTERFACE
   const onOpenSignIn = () => {
     /** This is a public function. */
+    setAuthError("");
     setIsSignInOpen(true);
   };
 
@@ -711,15 +728,26 @@ function App() {
             </nav>
 
             <div style={headerStyles.right}>
-              <button
-                type="button"
-                style={primaryBtn}
-                onClick={onOpenSignIn}
-                aria-haspopup="dialog"
-                aria-expanded={isSignInOpen}
-              >
-                Sign In
-              </button>
+              {user ? (
+                <button
+                  type="button"
+                  style={secondaryBtn}
+                  onClick={signOut}
+                  aria-label="Sign out"
+                >
+                  Sign Out
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  style={primaryBtn}
+                  onClick={onOpenSignIn}
+                  aria-haspopup="dialog"
+                  aria-expanded={isSignInOpen}
+                >
+                  Sign In
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -779,7 +807,8 @@ function App() {
                     fontSize: 13,
                   }}
                 >
-                  Choose a provider to continue. (Placeholder—no real auth yet.)
+                  Continue with Google to save plans and personalize your
+                  experience.
                 </p>
               </div>
 
@@ -816,11 +845,16 @@ function App() {
                   justifyContent: "center",
                   gap: 10,
                   padding: "12px 14px",
+                  opacity: authBusy ? 0.85 : 1,
+                  cursor: authBusy ? "progress" : "pointer",
                 }}
                 onClick={async () => {
                   await signInWithGoogle();
+                  // Note: OAuth redirects, so usually the modal won't remain open.
+                  // Still, we close it for immediate UX responsiveness.
                   onCloseSignIn();
                 }}
+                disabled={authBusy}
               >
                 <span
                   aria-hidden="true"
@@ -840,8 +874,28 @@ function App() {
                 >
                   G
                 </span>
-                Sign in with Google
+                Continue with Google
               </button>
+
+              {authError ? (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    marginTop: 12,
+                    padding: 12,
+                    borderRadius: 14,
+                    border: "1px solid rgba(239, 68, 68, 0.35)",
+                    background: "rgba(239, 68, 68, 0.08)",
+                    color: "#B91C1C",
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    fontWeight: 800,
+                  }}
+                >
+                  {authError}
+                </div>
+              ) : null}
 
               <div
                 style={{
@@ -855,9 +909,9 @@ function App() {
                   lineHeight: 1.5,
                 }}
               >
-                <strong style={{ color: THEME.text }}>Note:</strong> this is a demo
-                UI. We’ll enable real authentication later (e.g., via Google OAuth
-                and a backend/auth provider).
+                <strong style={{ color: THEME.text }}>Note:</strong> WEGO uses
+                Supabase Auth. If you see a provider or redirect error, confirm
+                your Supabase Google provider settings and allowed redirect URLs.
               </div>
             </div>
           </div>
@@ -1136,8 +1190,7 @@ function App() {
                     Tip: Save time with Google Sign-In
                   </p>
                   <p style={{ margin: "6px 0 0", color: THEME.mutedText }}>
-                    Auth is a placeholder today. Next iteration will unlock saved
-                    plans, favorites, and one-tap checkout.
+                    Sign in enables saved plans and personalized recommendations.
                   </p>
                 </div>
 
@@ -2676,14 +2729,6 @@ function pickQuotes(all, count, seed) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr.slice(0, count);
-}
-
-function linkStyle() {
-  return {
-    color: THEME.primary,
-    fontWeight: 900,
-    textDecoration: "none",
-  };
 }
 
 export default App;
