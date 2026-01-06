@@ -205,13 +205,16 @@ function App() {
   const [planResult, setPlanResult] = useState(null);
   const [isPlanning, setIsPlanning] = useState(false);
 
-  // Quotes
+  // Quotes (still used in-page; removed "Refresh Quotes" from header per requirements)
   const [quoteSeed, setQuoteSeed] = useState(1);
   const [quotes, setQuotes] = useState(() => pickQuotes(MOCK_QUOTES, 3, 1));
 
-  // Auth placeholder state
+  // Auth placeholder state (keep best-effort supabase detection; auth remains stubbed)
   const [supabaseAvailable, setSupabaseAvailable] = useState(false);
   const supabaseRef = useRef(null);
+
+  // Sign-in prompt (modal)
+  const [isSignInOpen, setIsSignInOpen] = useState(false);
 
   // Sticky header shadow on scroll (small UX polish)
   const [scrolled, setScrolled] = useState(false);
@@ -246,15 +249,7 @@ function App() {
 
   // Smooth anchor behavior + active section tracking
   useEffect(() => {
-    const sectionIds = [
-      "home",
-      "planner",
-      "quotes",
-      "reviews",
-      "about",
-      "contact",
-      "policies",
-    ];
+    const sectionIds = ["home", "planner", "about", "contact", "privacy-policies"];
 
     const handler = () => {
       // Find the closest section to the top
@@ -341,22 +336,31 @@ function App() {
   // PUBLIC_INTERFACE
   const signInWithGoogle = async () => {
     /** This is a public function. */
-    // Future integration: handle actual auth state, user profile, session persistence, etc.
-    if (!supabaseRef.current) return;
-
+    // Placeholder by request: do not require Supabase config yet.
+    // In the future, this will call: supabase.auth.signInWithOAuth({ provider: "google", ... })
     try {
-      // We keep this a safe placeholder. In future: use supabase.auth.signInWithOAuth({...})
-      // Doing a no-op action, as requested.
       // eslint-disable-next-line no-alert
       alert(
-        "Google Sign-In placeholder.\n\nFuture: Supabase OAuth sign-in will be enabled here."
+        supabaseRef.current
+          ? "Google Sign-In placeholder.\n\nFuture: Supabase OAuth sign-in will be enabled here."
+          : "Google Sign-In placeholder.\n\nSupabase is not configured yet. This will be wired up in a future update."
       );
-      // eslint-disable-next-line no-console
-      console.log("Supabase client ready:", supabaseRef.current);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("Sign-in placeholder error:", e);
     }
+  };
+
+  // PUBLIC_INTERFACE
+  const onOpenSignIn = () => {
+    /** This is a public function. */
+    setIsSignInOpen(true);
+  };
+
+  // PUBLIC_INTERFACE
+  const onCloseSignIn = () => {
+    /** This is a public function. */
+    setIsSignInOpen(false);
   };
 
   // PUBLIC_INTERFACE
@@ -656,27 +660,6 @@ function App() {
                 styleFn={headerStyles.navBtn}
               />
               <NavItem
-                label="Planner"
-                targetId="planner"
-                active={activeNav === "planner"}
-                onClick={onNavClick}
-                styleFn={headerStyles.navBtn}
-              />
-              <NavItem
-                label="Quotes"
-                targetId="quotes"
-                active={activeNav === "quotes"}
-                onClick={onNavClick}
-                styleFn={headerStyles.navBtn}
-              />
-              <NavItem
-                label="Reviews"
-                targetId="reviews"
-                active={activeNav === "reviews"}
-                onClick={onNavClick}
-                styleFn={headerStyles.navBtn}
-              />
-              <NavItem
                 label="About"
                 targetId="about"
                 active={activeNav === "about"}
@@ -691,9 +674,9 @@ function App() {
                 styleFn={headerStyles.navBtn}
               />
               <NavItem
-                label="Policies"
-                targetId="policies"
-                active={activeNav === "policies"}
+                label="Privacy Policies"
+                targetId="privacy-policies"
+                active={activeNav === "privacy-policies"}
                 onClick={onNavClick}
                 styleFn={headerStyles.navBtn}
               />
@@ -702,15 +685,107 @@ function App() {
             <div style={headerStyles.right}>
               <button
                 type="button"
-                style={googleBtn}
-                onClick={supabaseAvailable ? signInWithGoogle : undefined}
-                disabled={!supabaseAvailable}
-                aria-disabled={!supabaseAvailable}
-                title={
-                  supabaseAvailable
-                    ? "Google Sign-In (placeholder)"
-                    : "Disabled: Set REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_KEY and ensure @supabase/supabase-js is installed."
-                }
+                style={primaryBtn}
+                onClick={onOpenSignIn}
+                aria-haspopup="dialog"
+                aria-expanded={isSignInOpen}
+              >
+                Sign In
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {isSignInOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Sign in dialog"
+          onMouseDown={(e) => {
+            // Close when clicking the backdrop (but not when clicking inside the modal)
+            if (e.target === e.currentTarget) onCloseSignIn();
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            background: "rgba(17, 24, 39, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 100%)",
+              background: THEME.surface,
+              borderRadius: 18,
+              border: `1px solid ${THEME.border}`,
+              boxShadow: THEME.shadow,
+              overflow: "hidden",
+              textAlign: "left",
+            }}
+          >
+            <div
+              style={{
+                padding: 16,
+                borderBottom: `1px solid ${THEME.border}`,
+                background:
+                  "linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(245, 158, 11, 0.06))",
+                display: "flex",
+                alignItems: "start",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0, fontSize: 18, letterSpacing: "-0.02em" }}>
+                  Sign in
+                </h2>
+                <p style={{ margin: "6px 0 0", color: THEME.mutedText, fontSize: 13 }}>
+                  Choose a provider to continue. (Placeholder—no real auth yet.)
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onCloseSignIn}
+                aria-label="Close sign in dialog"
+                style={{
+                  appearance: "none",
+                  border: `1px solid ${THEME.border}`,
+                  background: THEME.surface,
+                  color: THEME.text,
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  cursor: "pointer",
+                  fontWeight: 900,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: 16 }}>
+              <button
+                type="button"
+                style={{
+                  ...secondaryBtn,
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  padding: "12px 14px",
+                }}
+                onClick={async () => {
+                  await signInWithGoogle();
+                  onCloseSignIn();
+                }}
               >
                 <span
                   aria-hidden="true"
@@ -730,22 +805,28 @@ function App() {
                 >
                   G
                 </span>
-                Google Sign-In
+                Sign in with Google
               </button>
 
-              <button
-                type="button"
-                style={secondaryBtn}
-                onClick={refreshQuotes}
-                aria-label="Refresh quote suggestions"
-                title="Refresh quote suggestions"
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  borderRadius: 14,
+                  border: `1px solid ${THEME.border}`,
+                  background: THEME.background,
+                  color: THEME.mutedText,
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                }}
               >
-                Refresh Quotes
-              </button>
+                <strong style={{ color: THEME.text }}>Note:</strong> this is a demo UI.
+                We’ll enable real authentication later (e.g., via Google OAuth and a backend/auth provider).
+              </div>
             </div>
           </div>
         </div>
-      </header>
+      ) : null}
 
       <main>
         {/* HOME / HERO */}
@@ -802,9 +883,9 @@ function App() {
                   <button
                     type="button"
                     style={secondaryBtn}
-                    onClick={() => onNavClick("quotes")}
+                    onClick={() => onNavClick("planner")}
                   >
-                    Browse Quotes
+                    Browse trip ideas
                   </button>
                 </div>
 
@@ -1123,88 +1204,120 @@ function App() {
           </div>
         </section>
 
-        {/* POLICIES */}
+        {/* PRIVACY POLICIES */}
         <section
-          id="policies"
+          id="privacy-policies"
           style={{ ...layout.section, paddingBottom: 62 }}
-          aria-label="Policies section"
+          aria-label="Privacy policies section"
         >
           <div style={layout.container}>
-            <h2 style={layout.sectionTitle}>Infringement & Policies</h2>
+            <h2 style={layout.sectionTitle}>Privacy Policies</h2>
             <p style={layout.sectionSubtitle}>
-              These are placeholders for your legal pages. Add full policy text
-              and links when ready.
+              A concise overview of how a typical travel planning app handles data.
+              This demo UI does not currently send personal data to a backend.
             </p>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1.15fr 0.85fr",
-                gap: 12,
-              }}
-            >
-              <div style={{ ...layout.card, padding: 16 }}>
-                <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>
-                  Infringement notice
-                </h3>
-                <p style={{ margin: 0, color: THEME.mutedText }}>
-                  If you believe content infringes your rights, please contact us
-                  with supporting details. We’ll review and respond promptly.
-                </p>
-              </div>
+            <div style={{ ...layout.card, padding: 16, textAlign: "left" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+                <div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>
+                    Data we may collect
+                  </h3>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: THEME.mutedText }}>
+                    <li>
+                      <strong style={{ color: THEME.text }}>User profile</strong>:
+                      name, email, and basic account details (when sign-in is enabled).
+                    </li>
+                    <li>
+                      <strong style={{ color: THEME.text }}>Trip preferences</strong>:
+                      destination, dates, budget, travelers, and interests you enter in the planner.
+                    </li>
+                    <li>
+                      <strong style={{ color: THEME.text }}>Usage data</strong>:
+                      interactions and basic diagnostics to improve performance and reliability.
+                    </li>
+                  </ul>
+                </div>
 
-              <div style={{ ...layout.card, padding: 16 }}>
-                <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Quick links</h3>
-                <ul style={{ margin: 0, paddingLeft: 18, color: THEME.mutedText }}>
-                  <li>
-                    <a
-                      href="#policies"
-                      onClick={(e) => e.preventDefault()}
-                      style={linkStyle()}
-                      aria-label="Privacy Policy (placeholder)"
-                      title="Placeholder"
-                    >
-                      Privacy Policy
-                    </a>
-                  </li>
-                  <li>
-                    <a
-                      href="#policies"
-                      onClick={(e) => e.preventDefault()}
-                      style={linkStyle()}
-                      aria-label="Terms of Service (placeholder)"
-                      title="Placeholder"
-                    >
-                      Terms of Service
-                    </a>
-                  </li>
-                  <li>
-                    <a
-                      href="#policies"
-                      onClick={(e) => e.preventDefault()}
-                      style={linkStyle()}
-                      aria-label="Cookie Policy (placeholder)"
-                      title="Placeholder"
-                    >
-                      Cookie Policy
-                    </a>
-                  </li>
-                </ul>
+                <div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>
+                    How we use information
+                  </h3>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: THEME.mutedText }}>
+                    <li>Personalize recommendations and suggested trip ideas.</li>
+                    <li>Facilitate booking workflows (e.g., saving quotes, checkout later).</li>
+                    <li>Maintain security, prevent abuse, and troubleshoot issues.</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>
+                    Storage & retention
+                  </h3>
+                  <p style={{ margin: 0, color: THEME.mutedText, lineHeight: 1.55 }}>
+                    When accounts are enabled, we retain data only as long as needed to
+                    provide the service and meet legal/operational obligations. You may
+                    request deletion as described below.
+                  </p>
+                </div>
+
+                <div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>
+                    Third‑party sharing
+                  </h3>
+                  <p style={{ margin: 0, color: THEME.mutedText, lineHeight: 1.55 }}>
+                    We may share limited data with service providers that help operate the app,
+                    such as <strong style={{ color: THEME.text }}>analytics</strong> tools and
+                    <strong style={{ color: THEME.text }}> authentication providers</strong> (e.g., Google)
+                    when you choose to sign in. We do not sell personal information.
+                  </p>
+                </div>
+
+                <div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>
+                    Cookies & tracking
+                  </h3>
+                  <p style={{ margin: 0, color: THEME.mutedText, lineHeight: 1.55 }}>
+                    Cookies or similar technologies may be used for session management,
+                    preferences, and basic analytics. You can manage cookies through your browser settings.
+                  </p>
+                </div>
+
+                <div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>
+                    Your rights
+                  </h3>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: THEME.mutedText }}>
+                    <li>Access or request a copy of your information.</li>
+                    <li>Correct inaccurate information.</li>
+                    <li>Request deletion of your account and associated data (where applicable).</li>
+                    <li>Opt out of certain analytics or marketing communications (if enabled).</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>
+                    Contact
+                  </h3>
+                  <p style={{ margin: 0, color: THEME.mutedText, lineHeight: 1.55 }}>
+                    For privacy questions or requests, contact:{" "}
+                    <strong style={{ color: THEME.text }}>
+                      privacy@yourcompany.example
+                    </strong>{" "}
+                    (placeholder).
+                  </p>
+                </div>
 
                 <div
                   style={{
-                    marginTop: 12,
-                    padding: 12,
-                    borderRadius: 14,
-                    border: `1px solid ${THEME.border}`,
-                    background: THEME.background,
+                    paddingTop: 10,
+                    borderTop: `1px solid ${THEME.border}`,
                     color: THEME.mutedText,
+                    fontSize: 13,
                   }}
                 >
-                  <strong style={{ color: THEME.text }}>
-                    Upcoming features:
-                  </strong>{" "}
-                  booking, saved plans, and user accounts.
+                  <strong style={{ color: THEME.text }}>Effective date:</strong>{" "}
+                  2026-01-06
                 </div>
               </div>
             </div>
@@ -1258,14 +1371,14 @@ function App() {
               </button>
               <button
                 type="button"
-                onClick={() => onNavClick("policies")}
+                onClick={() => onNavClick("privacy-policies")}
                 style={{
                   ...secondaryBtn,
                   padding: "8px 12px",
                   borderRadius: 999,
                 }}
               >
-                Policies
+                Privacy Policies
               </button>
             </div>
           </div>
@@ -1277,7 +1390,7 @@ function App() {
         @media (max-width: 980px) {
           #home > div > div,
           #planner > div > div,
-          #policies > div > div {
+          #privacy-policies > div > div {
             grid-template-columns: 1fr !important;
           }
 
