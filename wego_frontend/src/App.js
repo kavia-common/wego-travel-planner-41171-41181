@@ -187,6 +187,12 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
 
+  // Email/password auth UI state (kept in App to avoid new component wiring)
+  const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
+  const [authForm, setAuthForm] = useState({ email: "", password: "" });
+  const [authTouched, setAuthTouched] = useState({ email: false, password: false });
+  const [authNotice, setAuthNotice] = useState(""); // non-error success/info messages (e.g., "check your email")
+
   // Sign-in prompt (modal)
   const [isSignInOpen, setIsSignInOpen] = useState(false);
 
@@ -354,10 +360,166 @@ function App() {
     setQuoteSeed((s) => s + 1);
   };
 
+  const emailLooksValid = (email) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
+
+  const passwordLooksValid = (pw) => String(pw || "").length >= 6;
+
+  const authFormErrors = useMemo(() => {
+    const e = {};
+    const email = authForm.email.trim();
+    const password = authForm.password;
+
+    if (authTouched.email) {
+      if (!email) e.email = "Email is required.";
+      else if (!emailLooksValid(email)) e.email = "Enter a valid email address.";
+    }
+    if (authTouched.password) {
+      if (!password) e.password = "Password is required.";
+      else if (!passwordLooksValid(password))
+        e.password = "Password must be at least 6 characters.";
+    }
+    return e;
+  }, [authForm.email, authForm.password, authTouched.email, authTouched.password]);
+
+  const canSubmitEmailPassword =
+    emailLooksValid(authForm.email.trim()) && passwordLooksValid(authForm.password);
+
+  // PUBLIC_INTERFACE
+  const signInWithEmailPassword = async (e) => {
+    /** This is a public function. */
+    e.preventDefault();
+    setAuthError("");
+    setAuthNotice("");
+    setAuthTouched({ email: true, password: true });
+
+    if (!canSubmitEmailPassword) return;
+
+    setAuthBusy(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: authForm.email.trim(),
+        password: authForm.password,
+      });
+
+      if (error) {
+        setAuthError(error.message || "Unable to sign in with email/password.");
+        return;
+      }
+
+      // Session/user state will be updated via onAuthStateChange,
+      // but we can optimistically close on success.
+      if (data?.session) {
+        setIsSignInOpen(false);
+        setAuthForm({ email: "", password: "" });
+        setAuthTouched({ email: false, password: false });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Email/password sign-in error:", err);
+      setAuthError("Something went wrong signing in. Please try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  // PUBLIC_INTERFACE
+  const signUpWithEmailPassword = async (e) => {
+    /** This is a public function. */
+    e.preventDefault();
+    setAuthError("");
+    setAuthNotice("");
+    setAuthTouched({ email: true, password: true });
+
+    if (!canSubmitEmailPassword) return;
+
+    setAuthBusy(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: authForm.email.trim(),
+        password: authForm.password,
+        options: {
+          // Uses same-origin by default. If you add an email template / redirect flow,
+          // ensure allowed redirect URLs include this origin in Supabase.
+          emailRedirectTo: window.location.origin,
+        },
+      });
+
+      if (error) {
+        setAuthError(error.message || "Unable to create account.");
+        return;
+      }
+
+      // If email confirmations are enabled, Supabase may not create a session immediately.
+      const createdUser = data?.user;
+      const hasSession = Boolean(data?.session);
+
+      if (hasSession) {
+        setIsSignInOpen(false);
+        setAuthForm({ email: "", password: "" });
+        setAuthTouched({ email: false, password: false });
+        return;
+      }
+
+      if (createdUser) {
+        setAuthNotice(
+          "Account created. Please check your email to confirm your account before signing in."
+        );
+      } else {
+        setAuthNotice(
+          "If this email is eligible, you'll receive a confirmation message shortly."
+        );
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Email/password sign-up error:", err);
+      setAuthError("Something went wrong creating your account. Please try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  // PUBLIC_INTERFACE
+  const sendPasswordReset = async () => {
+    /** This is a public function. */
+    setAuthError("");
+    setAuthNotice("");
+    setAuthTouched((t) => ({ ...t, email: true }));
+
+    const email = authForm.email.trim();
+    if (!emailLooksValid(email)) {
+      setAuthError("Enter a valid email to receive a reset link.");
+      return;
+    }
+
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+
+      if (error) {
+        setAuthError(error.message || "Unable to send reset email.");
+        return;
+      }
+
+      setAuthNotice(
+        "Password reset email sent (if the account exists). Please check your inbox."
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Reset password error:", err);
+      setAuthError("Something went wrong sending the reset email. Please try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
   // PUBLIC_INTERFACE
   const signInWithGoogle = async () => {
     /** This is a public function. */
     setAuthError("");
+    setAuthNotice("");
     setAuthBusy(true);
 
     try {
@@ -401,6 +563,10 @@ function App() {
   const onOpenSignIn = () => {
     /** This is a public function. */
     setAuthError("");
+    setAuthNotice("");
+    setAuthMode("signin");
+    setAuthForm({ email: "", password: "" });
+    setAuthTouched({ email: false, password: false });
     setIsSignInOpen(true);
   };
 
@@ -408,6 +574,9 @@ function App() {
   const onCloseSignIn = () => {
     /** This is a public function. */
     setIsSignInOpen(false);
+    setAuthError("");
+    setAuthNotice("");
+    setAuthTouched({ email: false, password: false });
   };
 
   // PUBLIC_INTERFACE
@@ -835,67 +1004,311 @@ function App() {
             </div>
 
             <div style={{ padding: 16 }}>
-              <button
-                type="button"
-                style={{
-                  ...secondaryBtn,
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 10,
-                  padding: "12px 14px",
-                  opacity: authBusy ? 0.85 : 1,
-                  cursor: authBusy ? "progress" : "pointer",
-                }}
-                onClick={async () => {
-                  await signInWithGoogle();
-                  // Note: OAuth redirects, so usually the modal won't remain open.
-                  // Still, we close it for immediate UX responsiveness.
-                  onCloseSignIn();
-                }}
-                disabled={authBusy}
+              {/* Primary: Email/password */}
+              <form
+                onSubmit={authMode === "signin" ? signInWithEmailPassword : signUpWithEmailPassword}
+                noValidate
+                aria-label={authMode === "signin" ? "Email sign in form" : "Create account form"}
               >
-                <span
+                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+                  <div>
+                    <label
+                      htmlFor="auth_email"
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 950,
+                        display: "block",
+                        marginBottom: 6,
+                        letterSpacing: "0.01em",
+                        color: THEME.text,
+                      }}
+                    >
+                      Email
+                    </label>
+                    <input
+                      id="auth_email"
+                      name="email"
+                      type="email"
+                      value={authForm.email}
+                      onChange={(e) =>
+                        setAuthForm((p) => ({ ...p, email: e.target.value }))
+                      }
+                      onBlur={() => setAuthTouched((t) => ({ ...t, email: true }))}
+                      autoComplete="email"
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: `1px solid ${
+                          authFormErrors.email ? "rgba(185, 28, 28, 0.35)" : THEME.border
+                        }`,
+                        background: THEME.surface,
+                        outline: "none",
+                        fontSize: 14,
+                      }}
+                      aria-invalid={Boolean(authFormErrors.email)}
+                      aria-describedby="auth_email_help auth_email_err"
+                      required
+                      disabled={authBusy}
+                    />
+                    <div
+                      id="auth_email_help"
+                      style={{ marginTop: 6, color: THEME.mutedText, fontSize: 12 }}
+                    >
+                      Use the email you want to sign in with.
+                    </div>
+                    {authFormErrors.email ? (
+                      <div
+                        id="auth_email_err"
+                        style={{
+                          marginTop: 6,
+                          color: "#B91C1C",
+                          fontSize: 12,
+                          fontWeight: 900,
+                        }}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {authFormErrors.email}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="auth_password"
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 950,
+                        display: "block",
+                        marginBottom: 6,
+                        letterSpacing: "0.01em",
+                        color: THEME.text,
+                      }}
+                    >
+                      Password
+                    </label>
+                    <input
+                      id="auth_password"
+                      name="password"
+                      type="password"
+                      value={authForm.password}
+                      onChange={(e) =>
+                        setAuthForm((p) => ({ ...p, password: e.target.value }))
+                      }
+                      onBlur={() =>
+                        setAuthTouched((t) => ({ ...t, password: true }))
+                      }
+                      autoComplete={authMode === "signin" ? "current-password" : "new-password"}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: `1px solid ${
+                          authFormErrors.password ? "rgba(185, 28, 28, 0.35)" : THEME.border
+                        }`,
+                        background: THEME.surface,
+                        outline: "none",
+                        fontSize: 14,
+                      }}
+                      aria-invalid={Boolean(authFormErrors.password)}
+                      aria-describedby="auth_password_help auth_password_err"
+                      required
+                      disabled={authBusy}
+                    />
+                    <div
+                      id="auth_password_help"
+                      style={{ marginTop: 6, color: THEME.mutedText, fontSize: 12 }}
+                    >
+                      Minimum 6 characters.
+                    </div>
+                    {authFormErrors.password ? (
+                      <div
+                        id="auth_password_err"
+                        style={{
+                          marginTop: 6,
+                          color: "#B91C1C",
+                          fontSize: 12,
+                          fontWeight: 900,
+                        }}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {authFormErrors.password}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <button
+                    type="submit"
+                    style={{
+                      ...primaryBtn,
+                      width: "100%",
+                      padding: "12px 14px",
+                      opacity: authBusy ? 0.85 : 1,
+                      cursor: authBusy ? "progress" : "pointer",
+                    }}
+                    disabled={authBusy || !canSubmitEmailPassword}
+                    aria-busy={authBusy}
+                  >
+                    {authMode === "signin" ? "Sign in" : "Create account"}
+                  </button>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                      marginTop: 2,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthError("");
+                        setAuthNotice("");
+                        setAuthTouched({ email: false, password: false });
+                        setAuthMode((m) => (m === "signin" ? "signup" : "signin"));
+                      }}
+                      style={{
+                        appearance: "none",
+                        border: "none",
+                        background: "transparent",
+                        color: THEME.primary,
+                        cursor: "pointer",
+                        fontWeight: 900,
+                        padding: 0,
+                        textAlign: "left",
+                      }}
+                    >
+                      {authMode === "signin"
+                        ? "Create account"
+                        : "I already have an account"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={sendPasswordReset}
+                      disabled={authBusy}
+                      style={{
+                        appearance: "none",
+                        border: "none",
+                        background: "transparent",
+                        color: THEME.mutedText,
+                        cursor: authBusy ? "default" : "pointer",
+                        fontWeight: 900,
+                        padding: 0,
+                        textAlign: "right",
+                      }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+
+                  {authNotice ? (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      style={{
+                        marginTop: 8,
+                        padding: 12,
+                        borderRadius: 14,
+                        border: "1px solid rgba(245, 158, 11, 0.40)",
+                        background: "rgba(245, 158, 11, 0.10)",
+                        color: THEME.text,
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                        fontWeight: 850,
+                      }}
+                    >
+                      {authNotice}
+                    </div>
+                  ) : null}
+
+                  {authError ? (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      style={{
+                        marginTop: 8,
+                        padding: 12,
+                        borderRadius: 14,
+                        border: "1px solid rgba(239, 68, 68, 0.35)",
+                        background: "rgba(239, 68, 68, 0.08)",
+                        color: "#B91C1C",
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {authError}
+                    </div>
+                  ) : null}
+                </div>
+              </form>
+
+              {/* Secondary: Google */}
+              <div style={{ marginTop: 14 }}>
+                <div
                   aria-hidden="true"
                   style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 8,
-                    background:
-                      "linear-gradient(135deg, rgba(17,24,39,0.08), rgba(17,24,39,0.02))",
-                    display: "inline-flex",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    margin: "12px 0",
+                  }}
+                >
+                  <div style={{ height: 1, flex: 1, background: THEME.border }} />
+                  <div style={{ fontSize: 12, color: THEME.mutedText, fontWeight: 900 }}>
+                    or
+                  </div>
+                  <div style={{ height: 1, flex: 1, background: THEME.border }} />
+                </div>
+
+                <button
+                  type="button"
+                  style={{
+                    ...secondaryBtn,
+                    width: "100%",
+                    display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    border: `1px solid ${THEME.border}`,
-                    fontSize: 12,
-                    fontWeight: 900,
+                    gap: 10,
+                    padding: "12px 14px",
+                    opacity: authBusy ? 0.85 : 1,
+                    cursor: authBusy ? "progress" : "pointer",
                   }}
-                >
-                  G
-                </span>
-                Continue with Google
-              </button>
-
-              {authError ? (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  style={{
-                    marginTop: 12,
-                    padding: 12,
-                    borderRadius: 14,
-                    border: "1px solid rgba(239, 68, 68, 0.35)",
-                    background: "rgba(239, 68, 68, 0.08)",
-                    color: "#B91C1C",
-                    fontSize: 13,
-                    lineHeight: 1.5,
-                    fontWeight: 800,
+                  onClick={async () => {
+                    await signInWithGoogle();
+                    // Note: OAuth redirects, so usually the modal won't remain open.
+                    // Still, we close it for immediate UX responsiveness.
+                    onCloseSignIn();
                   }}
+                  disabled={authBusy}
                 >
-                  {authError}
-                </div>
-              ) : null}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 8,
+                      background:
+                        "linear-gradient(135deg, rgba(17,24,39,0.08), rgba(17,24,39,0.02))",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: `1px solid ${THEME.border}`,
+                      fontSize: 12,
+                      fontWeight: 900,
+                    }}
+                  >
+                    G
+                  </span>
+                  Continue with Google
+                </button>
+              </div>
 
               <div
                 style={{
@@ -911,7 +1324,7 @@ function App() {
               >
                 <strong style={{ color: THEME.text }}>Note:</strong> WEGO uses
                 Supabase Auth. If you see a provider or redirect error, confirm
-                your Supabase Google provider settings and allowed redirect URLs.
+                your Supabase auth settings and allowed redirect URLs.
               </div>
             </div>
           </div>
